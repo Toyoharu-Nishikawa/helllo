@@ -1,0 +1,200 @@
+let id =0
+
+const MessageAPI = class{
+  constructor(targetApp){
+    this.inWbObjMap = new Map()
+    this.outWbObjMap = new Map()
+    this.name = targetApp.name
+    this.fullName = targetApp.fullName
+    this.id = targetApp.id
+    this.port = null
+
+    this.initializeChannel()
+  }
+  initializeChannel(){
+    const channel = new MessageChannel()
+    channel.port1.onmessage = this.handleMessage.bind(this)
+    channel.port1.start()
+    this.channel = channel
+    this.port = channel.port1
+  }
+  addInWbObj(wbObj){
+    const fullName = wbObj.fullName
+    this.inWbObjMap.set(fullName, wbObj)
+  }
+  addOutWbObj(wbObj){
+    const fullName = wbObj.fullName
+    this.outWbObjMap.set(fullName, wbObj)
+  }
+  async handleMessage(e){
+    //const func = this.methodMap.get(method) 
+    //func(data, port)
+
+    const header = e.data.header
+    console.log("header", header)
+    console.log("data", e.data)
+
+    switch(header){
+      case "RESPONSE": {
+        const req = e.data
+        console.log("RESPONSE data", req)
+        const requestId = req.requestId
+        const data = req.body
+        const ev = new CustomEvent(requestId, {detail: {data:data}})
+        document.dispatchEvent(ev)
+        break
+      }
+      case "REQUEST": {
+        const req = e.data
+        const res = e.target
+ 
+        const target = req.target
+        const method = req.method
+        const requestId = req.requestId
+
+        if(target === "WORKBENCH"){
+          if(method==="PUSH"){
+            break
+          }
+          const url = req.url
+          const results = this.wbFunc(method, url, req)
+          const obj = {
+            header: "RESONSE",
+            requestId: requestId,
+            body: results
+          }
+          res.postMessage(obj)
+          break 
+        }
+        else{
+          const stream = req.stream
+          const identifier = req.identifier
+          const targetWbList = this.getWbList(target, stream, identifier)
+          console.log("targetWbList",targetWbList)
+          if(method==="PUSH"){
+            targetWbList.forEach(v=>v.messageAPI.port.postMessage(req))
+            break
+          }
+          const results = await this.transmit(targetWbList, req)
+          console.log("results",results)
+          const obj = {
+            header: "RESPONSE",
+            requestId: requestId,
+            body: results
+          } 
+          res.postMessage(obj)
+          break
+        }
+      }
+    }
+  }
+  getWbList(target, stream, identifier){
+      
+    const wbFullList =  stream === "UPSTREAM" ? [...this.inWbObjMap.entries()] :
+                        stream === "DOWNSTREAM" ? [...this.outWbObjMap.entries()]:
+                        stream === "UP-DOWNSTREAM" ? [...this.inWbObjMap.entries(),...this.outWbObjMap.entries()]:
+                        stream === "GLOBAL" ? getWbFullList():
+                        []
+
+    const filteredList = wbFullList.filter(v=>v[0].startsWith(target))
+    //identifier is not inplimented now
+    //const wbList =filteredList.map(v=>v[1])
+
+    return filteredList 
+  }
+  async transmit(targetWbList, req){
+     const proms = targetWbList.map(async v=>{
+       const [key,wbObj] = v
+       const res = await wbObj.messageAPI.send(req)
+       console.log("res", res)
+       const li = [key, res]
+       return li 
+     })
+     const results = await Promise.all(proms)
+     return results
+  }
+  send(data){
+    const prom = new Promise((resolve, reject)=>{
+      const requestId = data.requestId
+      const callback = (e) =>{resolve(e.detail.data)}
+      document.addEventListener(requestId, callback, {once:true}) //event dispatched in hanldleMesage RESPONSE
+      this.port.postMessage(data)
+    })
+    return prom
+  }
+  wbFunc(method, url, req){
+    switch(method){
+      case "GET":{
+        switch(url){
+          case "/apps":{
+            const obj = {
+              name: this.name,
+              fullName: this.fullName,
+              label: this.label,
+              id: this.id,
+            }
+            return obj
+          }
+        }
+      }
+    }
+  }
+}
+
+
+export const WorkbenchMessage = class { 
+  constructor(name){
+    this.name = null 
+    this.id = null
+    this.win=null
+    this.initialize(name)
+  } 
+  initialize(name){
+    const fullName = name + "." + id
+    const label = fullName
+    this.name = name
+    this.id = id
+    this.fullName = fullName
+    this.labe = label
+    const targetApp = {fullName, name, id, label}
+    this.messageAPI = new MessageAPI(targetApp)
+ 
+    id++
+  }
+  async execute(){
+    if(!this.win || this.win.closed){
+      console.log("win",this.win,this.win?.closed)
+      const name = this.name
+      const fullName = this.fullName
+      const id = this.id
+      const label = this.label
+      const url = "/" + this.name + "/"
+      const self = this 
+      if(this.win?.closed){
+        //const targetApp = {fullName, name, id, label}
+        //this.messageAPI = new MessageAPI(targetApp)
+        this.messageAPI.initializeChannel()
+      }
+      this.win = window.open(url)  
+      this.win.onload = ()=>{
+        const obj = {name, fullName, id}
+        setTimeout(()=>self.win.postMessage(obj, "*", [self.messageAPI.channel.port2]),100)
+      }
+    }
+    else{
+      this.win.focus()
+    }
+
+  }
+  async start(){
+  }
+  async close(){
+    if(this.win){
+      this.win.close()
+    }
+  }
+  changeLabel(label){
+    this.labe = label
+  }
+}
+
