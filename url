@@ -1,0 +1,116 @@
+export const parseURL = (URL) =>{
+
+  const URLWithoutPrefixSlash = URL.startsWith("/") ? URL.slice(1) : URL
+  const [urlTmp,queryTmp] =  URLWithoutPrefixSlash.split("?")
+  const urlSplit = urlTmp.split("/")
+  const target = urlSplit[0]
+  const url = "/"+urlSplit.slice(1).join("/")
+
+  console.log("queryTmp",queryTmp)
+
+  const queryList = queryTmp ===undefined ? [] :
+    queryTmp === "" ? []:
+    queryTmp.split("&").map(v=>v.split("="))
+
+  console.log("queryList",queryList)
+
+  const queryMap = new Map()
+  for(let [key, value] of queryList){
+    if(queryMap.has(key)){
+      const list = queryMap.get(key)
+      list.push(value)
+    }
+    else{
+      queryMap.set(key, [value])
+    }
+  }
+  const query = Object()
+  for(let [key,value] of queryMap){
+    if(value.length>1){
+      query[key] = value
+    }
+    else{
+      query[key] =value[0]
+    }
+  }
+
+  const obj = {target, url, query}
+  return obj
+
+}
+
+
+export const getMatchURL = (url, urlMap) => {
+  const splitedURL = url.slice(1).split("/")
+  console.log("splitedURL",splitedURL )
+  const keys = [...urlMap.keys()]
+  const list = keys.map(v=>v.slice(1).split("/"))
+
+  console.log("list", list)
+
+  const urlLength = splitedURL.length
+  const filteredList = list.filter(v=>v.length === urlLength)
+  console.log("filteredList",filteredList)
+
+  const candidateSet = new Set(filteredList)
+  console.log("candidateSet",candidateSet)
+
+  console.log("splitedURL.length",splitedURL.length)
+  for(let i in splitedURL){
+    console.log("i",i)
+    const p = splitedURL[i]
+
+    const paramList = []
+    const removeList = []
+    const matchList = []
+
+    for(let c of candidateSet){
+      const q = c[i]
+      console.log(c)
+
+      if(q.startsWith(":")){
+        console.log("q",q)
+        paramList.push(c)
+      }
+      else if(p !==q){
+        console.log("p",p,"q", q)
+        removeList.push(c)
+      }
+      else{
+        matchList.push(c)
+      }
+    }
+    console.log("matchList.lengt",matchList.length)
+    if(matchList.length>0){
+     paramList.forEach(v=>candidateSet.delete(v))
+     removeList.forEach(v=>candidateSet.delete(v))
+    }
+    else{
+     removeList.forEach(v=>candidateSet.delete(v))
+    }
+  }
+
+  const candidateList = [...candidateSet.values()]
+  const candidateListLength = candidateList.length
+  console.log("candidateListLength",candidateListLength)
+  if(candidateListLength===0){
+    return ""
+  }
+  const candidate = candidateList[0]
+  const matchURL = "/"  + candidate.join("/")
+  return matchURL
+}
+
+export const parseParameters = (url, matchURL) => {
+  const splitedURL = url.slice(1).split("/")
+  const splitedMatchURL = matchURL.slice(1).split("/")
+
+  const obj = {}
+  splitedMatchURL.forEach((v,i)=>{
+    if(v.startsWith(":")){
+      const param = v.slice(1)
+      obj[param] = splitedURL[i]
+    }
+  })
+  return obj
+}
