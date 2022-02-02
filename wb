@@ -1,192 +1,254 @@
-let id =0
+import {createUUID} from "../../modules/uuid.js"
 
-const MessageAPI = class{
-  constructor(targetApp){
-    this.inWbObjMap = new Map()
-    this.outWbObjMap = new Map()
-    this.name = targetApp.name
-    this.fullName = targetApp.fullName
-    this.id = targetApp.id
-    this.port = null
-
-    this.initializeChannel()
+const Connection = class {
+  constructor(){
+    this.inMap = new Map()
+    this.outMap = new Map()
   }
-  initializeChannel(){
-    const channel = new MessageChannel()
-    channel.port1.onmessage = this.handleMessage.bind(this)
-    channel.port1.start()
-    this.channel = channel
-    this.port = channel.port1
+  addToIn(fullName, appObj){
+    this.inMap.set(fullName, appObj)
   }
-  addInWbObj(wbObj){
-    const fullName = wbObj.fullName
-    this.inWbObjMap.set(fullName, wbObj)
+  addToOut(fullName, appObj){
+    this.outMap.set(fullName, appObj)
   }
-  addOutWbObj(wbObj){
-    const fullName = wbObj.fullName
-    this.outWbObjMap.set(fullName, wbObj)
+  removeFromIn(fullName){
+    this.inMap.delete(fullName)
   }
-  async handleMessage(e){
-    //const func = this.methodMap.get(method) 
-    //func(data, port)
+  removeFromOut(fullName){
+    this.outMap.delete(fullName)
+  }
+  getInApps(){
+    const inList = [...this.inMap.values()]
+    return inList
+  }
+  getOutApps(){
+    const outList = [...this.outMap.values()]
+    return outList
+  }
 
-    const header = e.data.header
-    console.log("header", header)
-    console.log("data", e.data)
+  getInInfo(){
+    const inList = [...this.inMap.values()]
+    const appInfo = inList.map(v=>Object({fullName:v.fullName, name:v.name, label:v.label, appId:v.appId})) 
+    return appInfo
+  }
+  getOutInfo(){
+    const outList = [...this.outMap.values()]
+    const appInfo = outList.map(v=>Object({fullName:v.fullName, name:v.name, label:v.label, appId:v.appId})) 
+    return appInfo
+  }
+  getTargetAppList(target, stream, identifier){
+    const appList =  stream === "UPSTREAM" ? [...this.inMap.values()] :
+                     stream === "DOWNSTREAM" ? [...this.outMap.values()]:
+                     stream === "UPSTREAM_DOWNSTREAM" ? [...this.inMap.values(), ...this.outMap.values()]:
+                     []
 
-    switch(header){
-      case "RESPONSE": {
-        const req = e.data
-        console.log("RESPONSE data", req)
-        const requestId = req.requestId
-        const data = req.body
-        const ev = new CustomEvent(requestId, {detail: {data:data}})
-        document.dispatchEvent(ev)
-        break
-      }
-      case "REQUEST": {
-        const req = e.data
-        const res = e.target
- 
-        const target = req.target
-        const method = req.method
-        const requestId = req.requestId
-
-        if(target === "WORKBENCH"){
-          if(method==="PUSH"){
-            break
-          }
-          const url = req.url
-          const results = this.wbFunc(method, url, req)
-          const obj = {
-            header: "RESONSE",
-            requestId: requestId,
-            body: results
-          }
-          res.postMessage(obj)
-          break 
-        }
-        else{
-          const stream = req.stream
-          const identifier = req.identifier
-          const targetWbList = this.getWbList(target, stream, identifier)
-          console.log("targetWbList",targetWbList)
-          if(method==="PUSH"){
-            targetWbList.forEach(v=>v.messageAPI.port.postMessage(req))
-            break
-          }
-          const results = await this.transmit(targetWbList, req)
-          console.log("results",results)
-          const obj = {
-            header: "RESPONSE",
-            requestId: requestId,
-            body: results
-          } 
-          res.postMessage(obj)
-          break
-        }
-      }
+    if(target==="ALL"){
+      return appList
     }
-  }
-  getWbList(target, stream, identifier){
-      
-    const wbFullList =  stream === "UPSTREAM" ? [...this.inWbObjMap.entries()] :
-                        stream === "DOWNSTREAM" ? [...this.outWbObjMap.entries()]:
-                        stream === "UP-DOWNSTREAM" ? [...this.inWbObjMap.entries(),...this.outWbObjMap.entries()]:
-                        stream === "GLOBAL" ? getWbFullList():
-                        []
 
-    const filteredList = wbFullList.filter(v=>v[0].startsWith(target))
-    //identifier is not inplimented now
-    //const wbList =filteredList.map(v=>v[1])
+    const filterFunc = identifier === "NAME" ? (v) => v.name ===target :
+                       identifier === "FULLNAME" ? (v) => v.fullName ===target :
+                       identifier === "LABEL" ? (v) => v.label ===target :
+                       (v) => v.name ===target
+
+
+    const filteredList = appList.filter(filterFunc)
 
     return filteredList 
   }
-  async transmit(targetWbList, req){
-     const proms = targetWbList.map(async v=>{
-       const [key,wbObj] = v
-       const res = await wbObj.messageAPI.send(req)
+}
+
+
+const MessageAPI = class{
+  constructor(){
+    this.channel = null
+    this.port = null
+    this.getWsIdList = null
+    this.getWbIdList = null
+    
+    this.initialize()
+  }
+  initialize(){
+    const channel = new MessageChannel()
+    channel.port1.start()
+    this.channel = channel
+    this.port = channel.port1
+    this.setReceiver()
+  }
+  setReceiver(func){
+    const f = e => {
+      const req = e.data
+      const res = e.target
+      res.json = res.postMessage
+      func(req, res)
+    }
+    this.port.onmessage = f
+  }
+  send(data){
+    const prom = new Promise((resolve, reject)=>{
+      const requestUUID = data.requestUUID
+      const callback = (e) =>{resolve(e.detail.data)}
+      document.addEventListener(requestUUID, callback, {once:true}) //event dispatched in hanldleMesage RESPONSE
+      this.port.postMessage(data)
+    })
+    return prom
+  }
+}
+
+const App = class {
+  constructor(worksheet, wbApp){
+    this.messageAPI = null
+    this.connection = null
+    this.worksheet = worksheet
+    this.wbApp = wbApp 
+    this.initialize()
+  }
+  initialize(){
+    this.messageAPI = new MessageAPI()
+    this.connection = new Connection()
+    this.setReceiver()
+  }
+  setReceiver(){
+    this.messageAPI.setReceiver(this.handleMessage.bind(this))
+  }
+  async handleMessage(req, res){
+    console.log("on messsage", req)
+    const header = req.header
+    switch(header){
+      case "RESPONSE": {
+        this.responseFunc(req, res)
+        break
+      }
+      case "REQUEST": {
+        this.requestFunc(req, res)
+        break
+      }
+    }
+  }
+  responseFunc(req, res){
+     console.log("RESPONSE data", req)
+     const requestUUID = req.requestUUID
+     const data = req.body
+     const ev = new CustomEvent(requestUUID, {detail: {data:data}})
+     document.dispatchEvent(ev)
+  }
+  requestFunc(req, res){
+    const target = req.target
+    if(target === "WORKBENCH"){
+      this.requestToWorksheet(req, res)
+    }
+    else{
+      this.requestToOtherApps(req, res)
+    }
+  }
+  async requestToWorksheet(req, res){
+    const method = req.method
+    const url = req.url
+    const requestId = req.requestId
+
+    if(method==="PUSH"){
+      this.worksheet.api(method, url, req)
+      return
+    }
+    console.log("method", method, url)
+    const results = await this.worksheet.api(method, url, req)
+    const obj = {
+      header: "RESPONSE",
+      requestId: requestId,
+      body: results
+    }
+    res.json(obj)
+  }
+  async requestToOtherApps(req, res){
+    const target = req.target
+    const stream = req.stream
+    const method = req.method
+    const requestId = req.requestId
+    const myFullName = this.wbApp.fullName
+    const identifier = req.identifier
+    const targetAppList = stream === "GLOBAL" ? this.worksheet.getTargetAppList(target, identifier,myFullName):
+                         this.connection.getTargetAppList(target, stream, identifier)
+    console.log("targetAppList",targetAppList)
+
+    if(method==="PUSH"){
+      targetAppList.forEach(v=>v.app.messageAPI.send(req))
+      return 
+    }
+    const results = await this.transmit(targetAppList, req)
+    console.log("results",results)
+    const obj = {
+      header: "RESPONSE",
+      requestId: requestId,
+      body: results
+    } 
+    res.json(obj)
+  }
+  async transmit(targetAppList, req){
+     const proms = targetAppList.map(async v=>{
+       const requestUUID = createUUID()
+       req.requestUUID = requestUUID 
+       const res = await v.app.messageAPI.send(req)
+       const fullName = v.fullName
+       const __source = {
+        name: v.name,
+        fullName: v.fullName,
+        appId: v.appId,
+        label: v.label,
+       }
+       res.__source = __source
        console.log("res", res)
-       const li = [key, res]
+       const li = [fullName, res]
        return li 
      })
      const results = await Promise.all(proms)
      return results
   }
-  send(data){
-    const prom = new Promise((resolve, reject)=>{
-      const requestId = data.requestId
-      const callback = (e) =>{resolve(e.detail.data)}
-      document.addEventListener(requestId, callback, {once:true}) //event dispatched in hanldleMesage RESPONSE
-      this.port.postMessage(data)
-    })
-    return prom
-  }
-  wbFunc(method, url, req){
-    switch(method){
-      case "GET":{
-        switch(url){
-          case "/apps":{
-            const obj = {
-              name: this.name,
-              fullName: this.fullName,
-              label: this.label,
-              id: this.id,
-            }
-            return obj
-          }
-        }
-      }
-    }
-  }
 }
 
-
-export const WorkbenchMessage = class { 
-  constructor(name){
+export const WorkbenchApp = class { 
+  constructor(name, appId, worksheet){
     this.name = null 
-    this.id = null
-    this.win=null
-    this.initialize(name)
+    this.appId = null 
+    this.win= null
+    this.label=null
+    this.app = null
+    this.initialize(name, appId, worksheet)
   } 
-  initialize(name){
-    const fullName = name + "." + id
+  initialize(name, appId, worksheet){
+    const fullName = name + "." + appId 
     const label = fullName
     this.name = name
-    this.id = id
+    this.appId = appId 
     this.fullName = fullName
-    this.labe = label
-    const targetApp = {fullName, name, id, label}
-    this.messageAPI = new MessageAPI(targetApp)
- 
-    id++
+    this.label = label
+    this.getWbIdList = null
+    this.app = new App(worksheet, this)
   }
-  async execute(){
+  async open(){
     if(!this.win || this.win.closed){
       console.log("win",this.win,this.win?.closed)
       const name = this.name
       const fullName = this.fullName
-      const id = this.id
+      const appId = this.appId
       const label = this.label
       const url = "/" + this.name + "/"
       const self = this 
       if(this.win?.closed){
         //const targetApp = {fullName, name, id, label}
         //this.messageAPI = new MessageAPI(targetApp)
-        this.messageAPI.initializeChannel()
+        this.app.messageAPI.initialize()
+        this.app.setReceiver()
       }
       this.win = window.open(url)  
       this.win.onload = ()=>{
-        const obj = {name, fullName, id}
-        setTimeout(()=>self.win.postMessage(obj, "*", [self.messageAPI.channel.port2]),100)
+        const obj = {name, fullName, appId}
+        setTimeout(()=>self.win.postMessage(obj, "*", [self.app.messageAPI.channel.port2]),100)
       }
     }
     else{
       this.win.focus()
     }
 
-  }
-  async start(){
   }
   async close(){
     if(this.win){
