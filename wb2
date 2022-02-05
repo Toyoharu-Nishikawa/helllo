@@ -157,7 +157,7 @@ const	Transceiver = class{
 
     const method = obj?.method
     const stream = obj?.stream
-    const identifier = obj?.identifer
+    const identifier = obj?.identifier
     obj.method = method ===undefined ? "GET" : 
                  !methodList.includes(method)? "GET":
                  method 
