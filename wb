@@ -28,12 +28,12 @@ const Connection = class {
 
   getInInfo(){
     const inList = [...this.inMap.values()]
-    const appInfo = inList.map(v=>Object({fullName:v.fullName, name:v.name, label:v.label, appId:v.appId})) 
+    const appInfo = inList.map(v=>Object({name:v.name, fullName:v.fullName,label:v.label, appId:v.appId})) 
     return appInfo
   }
   getOutInfo(){
     const outList = [...this.outMap.values()]
-    const appInfo = outList.map(v=>Object({fullName:v.fullName, name:v.name, label:v.label, appId:v.appId})) 
+    const appInfo = outList.map(v=>Object({ name:v.name,fullName:v.fullName, label:v.label, appId:v.appId})) 
     return appInfo
   }
   getTargetAppList(target, stream, identifier){
@@ -256,7 +256,9 @@ export const WorkbenchApp = class {
     }
   }
   changeLabel(label){
-    this.labe = label
+    this.label = label
   }
 }
+
+
 
