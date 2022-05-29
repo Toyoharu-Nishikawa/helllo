@@ -2,6 +2,14 @@ import {parseURL,getMatchURL, parseParameters} from "../../modules/url.js"
 import {createUUID} from "../../modules/uuid.js"
 
 
+const setInternalMethod = (app, workbench) => {
+  app.add("PUSH", "/label", (req,res)=>{
+    const label = req.body.label      
+    workbench.appInfo.setLabel(label)
+    workbench.title.setTitle(label)
+  })
+}
+
 const App = class{
   constructor(){
     this.methodMap = new Map([
@@ -83,28 +91,78 @@ const App = class{
   }
 } 
 
-const MessageAPI = class{
+const Title = class {
   constructor(){
-    this.port= null 
+    this.originTitle = null
+    this.title = null
+    this.initialize()
+  }
+  initialize(){
+    const originTitle = document.title
+    this.originTitle = originTitle
+  }
+  setTitle(label){
+    const title = this.originTitle + " / " + label
+    this.title = title
+    document.title = title
+  }
+  getTitle(){
+    return this.title
+  }
+}
+
+const AppInfo = class{
+  constructor(){
     this.fullName= null 
     this.name= null 
+    this.label= null 
     this.appId= null 
+  }
+  setInfo(data){
+    this.fullName = data.fullName
+    this.name = data.name
+    this.appId= data.appId
+    this.label= data.label
+  }
+  setLabel(label){
+    this.label = label
+  }
+  getInfo(){
+    const obj = {
+      fullName:this.fullName,
+      name: this.name,
+      appId: this.appId,
+      label: this.label
+    }   
+    return obj
+  }
+}
+
+const MessageAPI = class{
+  constructor(workbench){
+    this.workbench = workbench
+    this.port= null 
     this.app = new App()
+    this.appInternal = new App(workbench)
   }
   initialize(e){
     this.port = e.ports[0]
-    this.fullName = e.data.fullName
-    this.name = e.data.name
-    this.appId= e.data.appId
     this.port.start()
     this.setReceiver()
+    this.workbench.appInfo.setInfo(e.data)
+    setInternalMethod(this.appInternal, this.workbench)
   }
   setReceiver(){
     const self = this
     const f = e => {
       const req = e.data
       const res = e.target
-      self.app.handleMessage(req, res)
+      if(req.connection==="INTERNAL"){
+        self.appInternal.handleMessage(req, res)
+      }
+      else{
+        self.app.handleMessage(req, res)
+      }
     }
     this.port.onmessage = f
   }
@@ -113,19 +171,26 @@ const MessageAPI = class{
   }
   async fetch(obj, requestId){
     const self = this
-    const prom =  new Promise((resolve,reject)=>{
-      document.addEventListener(requestId, (e)=>{resolve(e.detail.data)}, {once:true});
+    const method = obj.method
+    if(method !=="PUSH"){
+      const prom =  new Promise((resolve,reject)=>{
+        document.addEventListener(requestId, (e)=>{resolve(e.detail.data)}, {once:true});
+        self.send(obj)
+      })
+      return prom
+    }
+    else{
       self.send(obj)
-    })
-    return prom
+    }
   }
 }
  
 
 
 const	Transceiver = class{
-  constructor(){
-    this.messageAPI = new MessageAPI()
+  constructor(workbench){
+    this.workbench=workbench
+    this.messageAPI = new MessageAPI(workbench)
   }
   initialize(e){
     this.messageAPI.initialize(e)
@@ -171,11 +236,13 @@ const	Transceiver = class{
 
     const {target, url, query} = parseURL(URL)
     obj.url = url
+    obj.connection = "EXTERNAL"
     obj.header = "REQUEST"
     obj.source = {
-      name: this.messageAPI.name,
-      fullName: this.messageAPI.fullName,
-      appId: this.messageAPI.appId
+      name: this.workbench.appInfo.name,
+      fullName: this.workbnech.appInfo.fullName,
+      label: this.workbench.appInfo.label,
+      appId: this.workbench.appInfo.appId,
     }
     obj.target = target
     obj.url = url
@@ -202,14 +269,20 @@ const	Transceiver = class{
 
 export const Workbench = class{
   constructor(){
+    this.title = null
+    this.appInfo = null
     this.transceiver = null
     this.initialize()
   }
   initialize(){
-    this.transceiver = new Transceiver()
+    this.title = new Title()
+    this.appInfo = new AppInfo()
+    this.transceiver = new Transceiver(this)
     const self = this
     const f = (e)=>{
       self.transceiver.initialize(e)
+      const label = self.appInfo.label
+      self.title.setTitle(label)
       window.onmessage = null
     }
     window.onmessage = f 
@@ -221,8 +294,9 @@ export const Workbench = class{
   getMyName(){
     const fullName = this.transceiver.messageAPI.fullName
     const name = this.transceiver.messageAPI.name
-    const id = this.transceiver.messageAPI.id
-    const obj = {fullName, name, id}
+    const appId = this.transceiver.messageAPI.appId
+    const label = this.transceiver.messageAPI.label
+    const obj = {fullName, name, appId,label}
     return obj
   }
   express(){
