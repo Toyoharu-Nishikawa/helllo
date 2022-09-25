@@ -1,30 +1,48 @@
 export const parseURL = (URL) =>{
-
+ 
   const URLWithoutPrefixSlash = URL.startsWith("/") ? URL.slice(1) : URL
   const [urlTmp,queryTmp] =  URLWithoutPrefixSlash.split("?")
   const urlSplit = urlTmp.split("/")
   const target = urlSplit[0]
   const url = "/"+urlSplit.slice(1).join("/")
-
+  
   console.log("queryTmp",queryTmp)
 
-  const queryList = queryTmp ===undefined ? [] :
-    queryTmp === "" ? []:
-    queryTmp.split("&").map(v=>v.split("="))
+  const query = parseQuery(queryTmp) 
+  const obj = {target, url, query}
+  return obj
+}
 
+export const parseURLforMini = (URL) => {
+    const URLWithoutPrefixSlash = URL.startsWith("/") ? URL.slice(1) : URL
+    const [urlTmp,queryTmp] = URLWithoutPrefixSlash.split("?")
+    const urlSplit = urlTmp.split("/")
+    const url = "/"+urlSplit.join("/")
+ 
+    const query = parseQuery(queryTmp)
+
+    const obj = {url ,query}
+    return obj
+}
+
+export const parseQuery = (queryString) => {
+  const queryList = queryString ===undefined ? [] : 
+    queryString === "" ? []:
+    queryString.split("&").map(v=>v.split("="))
+    
   console.log("queryList",queryList)
-
+ 
   const queryMap = new Map()
   for(let [key, value] of queryList){
     if(queryMap.has(key)){
-      const list = queryMap.get(key)
+      const list = queryMap.get(key) 
       list.push(value)
     }
     else{
       queryMap.set(key, [value])
     }
   }
-  const query = Object()
+  const query = Object() 
   for(let [key,value] of queryMap){
     if(value.length>1){
       query[key] = value
@@ -33,10 +51,7 @@ export const parseURL = (URL) =>{
       query[key] =value[0]
     }
   }
-
-  const obj = {target, url, query}
-  return obj
-
+  return query
 }
 
 
