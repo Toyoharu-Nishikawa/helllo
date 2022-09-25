@@ -1,4 +1,19 @@
+import {parseURL,getMatchURL, parseParameters} from "../../modules/url.js"
 import {createUUID} from "../../modules/uuid.js"
+
+const setInternalMethod = (app, wbApp) => {
+  app.add("PUSH", "/open", (req,res)=>{
+    console.log("open")
+    const openEvent = new CustomEvent('openAPP') 
+    window.dispatchEvent(openEvent)
+  })
+  app.add("PUSH", "/unload", (req,res)=>{
+    console.log("unload")
+    wbApp.reload()
+  })
+
+}
+
 
 const Connection = class {
   constructor(){
@@ -73,7 +88,7 @@ const MessageAPI = class{
     channel.port1.start()
     this.channel = channel
     this.port = channel.port1
-    this.setReceiver()
+    //this.setReceiver()
   }
   setReceiver(func){
     const f = e => {
@@ -103,18 +118,32 @@ const MessageAPI = class{
   }
 }
 
+
+
 const App = class {
   constructor(worksheet, wbApp){
     this.messageAPI = null
     this.connection = null
     this.worksheet = worksheet
     this.wbApp = wbApp 
+    this.methodMap = new Map([
+      ["DELETE", new Map()],
+      ["GET", new Map()],
+      ["POST", new Map()],
+      ["PUSH", new Map()],
+      ["PUT", new Map()],
+      ["UPDATE", new Map()],
+    ])
     this.initialize()
   }
   initialize(){
     this.messageAPI = new MessageAPI()
     this.connection = new Connection()
     this.setReceiver()
+  }
+  add(method, url, func){
+    const methodMap = this.methodMap.get(method)
+    methodMap.set(url, func)
   }
   setReceiver(){
     this.messageAPI.setReceiver(this.handleMessage.bind(this))
@@ -142,11 +171,18 @@ const App = class {
   }
   requestFunc(req, res){
     const target = req.target
-    if(target === "WORKBENCH"){
-      this.requestToWorksheet(req, res)
-    }
-    else{
-      this.requestToOtherApps(req, res)
+    switch(target){
+      case "WORKSHEET":{
+        this.requestToWorksheet(req, res)
+        break
+      }
+      case  "INTERNAL":{
+        this.requestToINTERNAL(req, res)
+        break
+      }
+      default :{
+        this.requestToOtherApps(req, res)
+      }
     }
   }
   async requestToWorksheet(req, res){
@@ -166,6 +202,52 @@ const App = class {
       body: results
     }
     res.json(obj)
+  }
+  async requestToINTERNAL(req, res){
+    console.log("request to internal ")
+    const method = req.method
+    const url = req.url
+    const requestId = req.requestId
+
+    const f = (body) => {
+      const obj = {
+        header: "RESPONSE",
+        requestId: requestId,
+        requestUUID: requestUUID,
+        body: body,
+      }
+      res.postMessage(obj)
+    }
+    res.json = f
+
+    const urlMap = this.methodMap.get(method)
+    if(urlMap ===undefined){
+      //throw new Error(`method ${method} does not match`)
+      const errorMessage = `method ${method} is not defined`
+      console.log(errorMessage)
+      const obj = {errorMessage: errorMessage}
+      res.json(obj)
+      return
+    }
+
+    const matchURL = getMatchURL(url,urlMap)
+    console.log("matchURL", matchURL)
+
+    const func = urlMap.get(matchURL)
+    if(func ===undefined){
+      //throw new Error(`url: ${url} is no defined`)
+      const errorMessage = `url: ${url} is no defined`
+      console.log(errorMessage)
+      const obj = {errorMessage: errorMessage}
+      res.json(obj)
+      return
+    }
+
+    const params = parseParameters(url, matchURL)
+    console.log("params",params)
+    req.params = params
+
+    func(req, res)
   }
   async requestToOtherApps(req, res){
     const target = req.target
@@ -211,7 +293,7 @@ const App = class {
      const results = await Promise.all(proms)
      return results
   }
-  async fetch(URL, obj){
+  async internalFetch(URL, obj){
     const requestUUID = createUUID()
     obj.connection = "INTERNAL"
     obj.header = "REQUEST"
@@ -241,9 +323,13 @@ export const WorkbenchApp = class {
     this.label = label
     this.getWbIdList = null
     this.app = new App(worksheet, this)
+    this.WORKBENCH_CERTIFICATION_ID = null
+    this.win = null
+    setInternalMethod(this.app, this)
   }
   async open(){
     if(!this.win || this.win.closed){
+      this.removeReloadEventListener()
       console.log("win",this.win,this.win?.closed)
       const name = this.name
       const fullName = this.fullName
@@ -252,29 +338,71 @@ export const WorkbenchApp = class {
       const url = "/" + this.name + "/"
       const self = this 
       if(this.win?.closed){
-        //const targetApp = {fullName, name, id, label}
-        //this.messageAPI = new MessageAPI(targetApp)
         this.app.messageAPI.initialize()
         this.app.setReceiver()
       }
-      this.win = window.open(url)  
-      this.win.onload = ()=>{
-        const obj = {name, fullName, appId, label}
-        setTimeout(()=>self.win.postMessage(obj, "*", [self.app.messageAPI.channel.port2]),100)
+
+      const f = (e) => {
+        const certification = e.data
+        console.log("receive message",certification)
+        if(certification===WORKBENCH_CERTIFICATION_ID){
+          window.removeEventListener("message",f)
+          console.log("match certification")
+          const obj = {name, fullName, appId, label}
+          self.win.postMessage(obj, "*", [self.app.messageAPI.channel.port2])
+        }
       }
+      window.addEventListener("message",f)
+
+      this.win = window.open(url)  
+      const WORKBENCH_CERTIFICATION_ID = createUUID()
+      this.WORKBENCH_CERTIFICATION_ID = WORKBENCH_CERTIFICATION_ID
+      this.win.WORKBENCH_CERTIFICATION_ID = WORKBENCH_CERTIFICATION_ID
+
+
     }
     else{
+      console.log("focus")
       this.win.focus()
     }
+  }
+  async reload(){
+    console.log("win",this.win,this.win?.closed)
+    const name = this.name
+    const fullName = this.fullName
+    const appId = this.appId
+    const label = this.label
+    const self = this 
 
+    const WORKBENCH_CERTIFICATION_ID = this.WORKBENCH_CERTIFICATION_ID
+    const f = (e) => {
+      window.removeEventListener("message",f)
+      const certification = e.data
+      console.log("receive message for reload",certification)
+      //if(certification===WORKBENCH_CERTIFICATION_ID){
+        console.log("match certification for reload")
+
+        self.app.messageAPI.initialize()
+        self.app.setReceiver()
+        const obj = {name, fullName, appId, label}
+        self.win.postMessage(obj, "*", [self.app.messageAPI.channel.port2])
+
+      //}
+    }
+    window.addEventListener("message",f)
+    this.reloadFun = f
+  }
+  removeReloadEventListener(){
+    const f = this.reloadFun 
+    window.removeEventListener("message",f)
   }
   async close(){
     if(this.win){
       this.win.close()
     }
   }
-  async fetch(URL, obj){
-    return await this.app.fetch(URL,obj)
+  async internalFetch(URL, obj){
+    return await this.app.internalFetch(URL,obj)
   }
   changeLabel(label){
     this.label = label
@@ -282,7 +410,7 @@ export const WorkbenchApp = class {
       method: "PUSH",
       body: {label}
     } 
-    this.fetch("/label", obj)
+    this.internalFetch("/label", obj)
   }
 }
 
