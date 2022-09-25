@@ -149,7 +149,7 @@ const MessageAPI = class{
     this.port = e.ports[0]
     this.port.start()
     this.setReceiver()
-    this.workbench.appInfo.setInfo(e.data)
+//    this.workbench.appInfo.setInfo(e.data)
     setInternalMethod(this.appInternal, this.workbench)
   }
   setReceiver(){
@@ -240,7 +240,7 @@ const	Transceiver = class{
     obj.header = "REQUEST"
     obj.source = {
       name: this.workbench.appInfo.name,
-      fullName: this.workbnech.appInfo.fullName,
+      fullName: this.workbench.appInfo.fullName,
       label: this.workbench.appInfo.label,
       appId: this.workbench.appInfo.appId,
     }
@@ -279,23 +279,54 @@ export const Workbench = class{
     this.appInfo = new AppInfo()
     this.transceiver = new Transceiver(this)
     const self = this
+
     const f = (e)=>{
+      console.log("e",e)
       self.transceiver.initialize(e)
+      self.appInfo.setInfo(e.data)
+      console.log("I am", self.appInfo)
       const label = self.appInfo.label
       self.title.setTitle(label)
-      window.onmessage = null
+
+
+      self.fetch("/INTERNAL/open",{method:"PUSH",connection:"INTERNAL"})
+      console.log("established communication with workbench")
+      window.addEventListener("beforeunload",(e)=>{
+        self.fetch("/INTERNAL/unload",{method:"PUSH",connection:"INTERNAL"})
+      },{onece:true})
     }
-    window.onmessage = f 
+
+    const WORKBENCH_CERTIFICATION_ID = window.WORKBENCH_CERTIFICATION_ID
+    console.log("WORKBENCH_CERTIFICATION_ID",window,WORKBENCH_CERTIFICATION_ID)
+//    if(WORKBENCH_CERTIFICATION_ID){
+      if(window.opener){
+        /* opened from Workbench as a new tab*/
+        console.log("opened from Workbench as a new tab")
+        console.log("start communication to workbench")
+        window.addEventListener("message",f,{once:true}) 
+        window.opener?.postMessage(WORKBENCH_CERTIFICATION_ID)
+      }
+      else if(window !==window.parent){
+        /* opened from miniWorkbench as a iframe */
+        console.log("opened from miniWorkbench as a iframe")
+        console.log("start communication to workbench")
+        window.addEventListener("message",f,{once:true}) 
+        window.parent?.postMessage(WORKBENCH_CERTIFICATION_ID)
+      }
+      else{
+        console.log("opened from top page as a new tab")
+      }
+//    }
   }
   async getAppInfo(){
     const appInfo = await this.transceiver.fetch("/WORKBENCH/appInfo")
     return appInfo
   }
   getMyName(){
-    const fullName = this.transceiver.messageAPI.fullName
-    const name = this.transceiver.messageAPI.name
-    const appId = this.transceiver.messageAPI.appId
-    const label = this.transceiver.messageAPI.label
+    const fullName = this.appInfo.fullName
+    const name     = this.appInfo.name
+    const appId    = this.appInfo.appId
+    const label    = this.appInfo.label
     const obj = {fullName, name, appId,label}
     return obj
   }
@@ -326,4 +357,3 @@ export const Workbench = class{
     return await this.transceiver.fetch(URL, obj)
   }
 }
-
