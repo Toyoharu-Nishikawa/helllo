@@ -1,0 +1,178 @@
+console.clear()
+
+const drawCurve = (sheet, points, color) => {
+  sheet.addFig("polyline",{points:points},{stroke:color})
+}
+const drawCircles = (sheet, points, radius=0.2, fill, stroke) => {
+  points.forEach(v=>{
+    sheet.addFig("circle",{center:v,radius:radius},{fill:fill,stroke:stroke})
+  })
+} 
+
+const makeBezierCurve = (controlPoints, sheet0,displayOn) => {
+  const Np =  21
+  const Nc = 101 
+  const bez = sci.geometry.bezier(controlPoints)
+  const sBpoints = [...Array(Np)].map((v,i)=>bez(i/(Np-1)))
+  const sBcurve = [...Array(Nc)].map((v,i)=>bez(i/(Nc-1)))
+  
+  if(sheet0 && displayOn){
+    drawCurve(sheet0, controlPoints, "black")
+    drawCircles(sheet0, controlPoints, 0.2, "black","black")
+    
+    drawCurve(sheet0, sBcurve, "green")
+    drawCircles(sheet0, sBpoints, 0.2, "green","green")
+  }
+  
+  return sBpoints
+}
+
+const makeProfile = (profilePoints,pitch, sheet0,color) => {
+  const {sPoints, pPoints} = profilePoints
+  const sSpline = sci.interpolate.normalizedCubicspline(sPoints) 
+  const pSpline = sci.interpolate.normalizedCubicspline(pPoints) 
+  const teLine = [pPoints[0],sPoints[0]]
+  const leLine = [pPoints[pPoints.length-1],sPoints[sPoints.length-1]]
+  
+  const Np =  21
+  const Nc = 101 
+  const sSpoints = [...Array(Np)].map((v,i)=>[sSpline.X(i/(Np-1)),sSpline.Y(i/(Np-1))])
+  const sScurve = [...Array(Nc)].map((v,i)=>[sSpline.X(i/(Nc-1)),sSpline.Y(i/(Nc-1))])
+  const pSpoints = [...Array(Np)].map((v,i)=>[pSpline.X(i/(Np-1)),pSpline.Y(i/(Np-1))])
+  const pScurve = [...Array(Nc)].map((v,i)=>[pSpline.X(i/(Nc-1)),pSpline.Y(i/(Nc-1))])
+  
+  drawCurve(sheet0, sScurve,color)
+  drawCurve(sheet0, pScurve,color)
+  drawCurve(sheet0, leLine, color)
+  drawCurve(sheet0, teLine, color)
+  
+  const teCircle = sci.geometry.getContactCircleOfTwoSplinesAndOneLine(pSpline,sSpline,teLine,0.05,0.05) 
+  const leCircle = sci.geometry.getContactCircleOfTwoSplinesAndOneLine(pSpline,sSpline,leLine,0.9,0.9) 
+  drawCircles(sheet0, [teCircle.center], teCircle.radius, "",color)
+  drawCircles(sheet0, [leCircle.center], leCircle.radius, "",color)
+  
+  
+  const sScurveNext = sScurve.map(v=>[v[0],v[1]+pitch])
+  const pScurveNext = pScurve.map(v=>[v[0],v[1]+pitch])
+  drawCurve(sheet0, sScurveNext,color)
+  drawCurve(sheet0, pScurveNext,color)
+  const teCircleCenterNext = [teCircle.center[0],teCircle.center[1]+pitch]
+  const leCircleCenterNext = [leCircle.center[0],leCircle.center[1]+pitch]
+  drawCircles(sheet0, [teCircleCenterNext], teCircle.radius, "",color)
+  drawCircles(sheet0, [leCircleCenterNext], leCircle.radius, "",color)
+
+  const minDistance = sci.geometry.minDistanceFromPointToCurve(teCircleCenterNext, sSpline,10,30, 1E-5) 
+  const throatLength = minDistance.distance - teCircle.radius
+  const throatLine = [teCircleCenterNext,minDistance.S]
+  console.log("OK",teCircleCenterNext,minDistance,sSpline)
+  drawCurve(sheet0, throatLine,color)
+  
+  const gauging = throatLength/pitch
+  
+  const sThroat = minDistance.s
+  
+  const obj = {
+    sSpline, pSpline, teCircle, sThroat,gauging,throatLine,sPoints,pPoints,
+  }
+  return obj
+  
+}
+
+const makeCorrectedCurve = (profile, deviationAngleDeg, sheet0, color) => { 
+  const teContactPoint = profile.teCircle.P2   //C1
+  const teContactAngelRad = profile.teCircle.theta2
+  const teTangentAngleRad = teContactAngelRad-Math.PI/2
+  const corrTeTangentAngleRad = teTangentAngleRad + deviationAngleDeg/180*Math.PI
+  const corrTeTangentAngleDeg = corrTeTangentAngleRad/Math.PI*180
+  console.log("corrTeTangentAngleDeg",corrTeTangentAngleDeg)
+  const teTan = Math.tan(corrTeTangentAngleRad)  //C2
+  
+  
+  
+  const sThroat = profile.sThroat
+  const throatPoint = profile.throatLine[1] //C3
+  const dxThroatPoint = profile.sSpline.DX(sThroat) 
+  const dyThroatPoint = profile.sSpline.DY(sThroat) 
+  const throatTan = dyThroatPoint/dxThroatPoint //C4
+  const d2xThroatPoint = profile.sSpline.D2X(sThroat) 
+  const d2yThroatPoint = profile.sSpline.D2Y(sThroat) 
+  
+  const throatD2 = (d2yThroatPoint*dxThroatPoint - dyThroatPoint*d2xThroatPoint)/dxThroatPoint**3 //C5
+  
+  const x1 = teContactPoint[0]
+  const x2 = throatPoint[0]
+  
+  const A = [
+    [1,  x1,   x1**2,   x1**3,    x1**4],
+    [0,   1, 2*x1,    3*x1**2,  4*x1**3],
+    [1,  x2,   x2**2,   x2**3,    x2**4],
+    [0,   1, 2*x2,    3*x2**2,  4*x2**3],
+    [0,   0,    2,    6*x2   , 12*x2**2],
+  ]
+  const b = [
+    teContactPoint[1],
+    teTan,
+    throatPoint[1],
+    throatTan,
+    throatD2,
+  ]
+  
+  const a = sci.solve.linEqGauss(A,b)
+  const corrF  = (x,a) => a.map((v,i)=>v*x**i).reduce((p,c)=>p+c,0)
+  
+  const N = 21
+  const corrXList = [...Array(N)].map((v,i)=>i/(N-1)*(x2-x1)+x1)
+  const corrPoints = corrXList.map(v=>[v,corrF(v,a)])
+  console.log("corrPoints",corrPoints)
+  
+  if(color !==""){
+    drawCurve(sheet0, corrPoints,color)
+  }
+  
+  const afts = [...Array(N)].map((v,i)=>i/(N-1)*(1-sThroat)+sThroat).slice(1)
+  const aftPoints = afts.map(v=>[profile.sSpline.X(v),profile.sSpline.Y(v)])
+  const newSpoints = [].concat([profile.sPoints[0]],corrPoints, aftPoints)
+  
+  const obj = {sPoints: newSpoints, pPoints: profile.pPoints}
+  return obj 
+}
+
+const main = async() => {
+  console.log("sci",sci.solve)
+  const MJ = await import("/jscad/scripts/minijscad/index.js")
+  const mj = new MJ.MiniJscad("draw",500,500)
+  const sheet0 = mj.sketch.screen.addSheet("sheet0")
+
+  const sCpoints = [
+    [-10, -20],
+    [ -5,  -2],
+    [  0,  10],
+    [  5,   7],
+    [ 10,   3],
+  ]
+ 
+  const pCpoints = [
+    [-10,   -21],
+    [ -5,   -10],
+    [  0,    -3],
+    [  5,     2],
+    [ 10,     0],
+  ] 
+  
+  const sPoints = makeBezierCurve(sCpoints,sheet0,false)
+  const pPoints = makeBezierCurve(pCpoints,sheet0,false)
+  const profilePoints = {sPoints, pPoints}
+  
+  const pitch = 24
+  
+  const profile = makeProfile(profilePoints,pitch, sheet0,"blue") 
+  console.log("profile",profile)
+  
+
+  
+  const newProfilePoints = makeCorrectedCurve(profile, 0, sheet0, "") 
+  console.log("newProfilePoints",newProfilePoints)
+  const newProfile = makeProfile(newProfilePoints,pitch, sheet0,"red") 
+  console.log("newProfile",newProfile)
+}
+main()
