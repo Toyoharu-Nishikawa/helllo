@@ -18,10 +18,10 @@ const makeBezierCurve = (controlPoints, sheet0,displayOn) => {
   
   if(sheet0 && displayOn){
     drawCurve(sheet0, controlPoints, "black")
-    drawCircles(sheet0, controlPoints, 0.2, "black","black")
+    //drawCircles(sheet0, controlPoints, 0.2, "black","black")
     
     drawCurve(sheet0, sBcurve, "green")
-    drawCircles(sheet0, sBpoints, 0.2, "green","green")
+   // drawCircles(sheet0, sBpoints, 0.2, "green","green")
   }
   
   return sBpoints
@@ -41,12 +41,14 @@ const makeProfile = (profilePoints,pitch, sheet0,color) => {
   const pSpoints = [...Array(Np)].map((v,i)=>[pSpline.X(i/(Np-1)),pSpline.Y(i/(Np-1))])
   const pScurve = [...Array(Nc)].map((v,i)=>[pSpline.X(i/(Nc-1)),pSpline.Y(i/(Nc-1))])
   
+  drawCircles(sheet0, sScurve,0.002,color, "")
+
   drawCurve(sheet0, sScurve,color)
   drawCurve(sheet0, pScurve,color)
   drawCurve(sheet0, leLine, color)
   drawCurve(sheet0, teLine, color)
   
-  const teCircle = sci.geometry.getContactCircleOfTwoSplinesAndOneLine(pSpline,sSpline,teLine,0.05,0.05) 
+  const teCircle = sci.geometry.getContactCircleOfTwoSplinesAndOneLine(pSpline,sSpline,teLine,0.03,0.001) 
   const leCircle = sci.geometry.getContactCircleOfTwoSplinesAndOneLine(pSpline,sSpline,leLine,0.9,0.9) 
   drawCircles(sheet0, [teCircle.center], teCircle.radius, "",color)
   drawCircles(sheet0, [leCircle.center], leCircle.radius, "",color)
@@ -64,7 +66,7 @@ const makeProfile = (profilePoints,pitch, sheet0,color) => {
   const minDistance = sci.geometry.minDistanceFromPointToCurve(teCircleCenterNext, sSpline,10,30, 1E-5) 
   const throatLength = minDistance.distance - teCircle.radius
   const throatLine = [teCircleCenterNext,minDistance.S]
-  console.log("OK",teCircleCenterNext,minDistance,sSpline)
+  //console.log("OK",teCircleCenterNext,minDistance,sSpline)
   drawCurve(sheet0, throatLine,color)
   
   const gauging = throatLength/pitch
@@ -79,12 +81,18 @@ const makeProfile = (profilePoints,pitch, sheet0,color) => {
 }
 
 const makeCorrectedCurve = (profile, deviationAngleDeg, sheet0, color) => { 
-  const teContactPoint = profile.teCircle.P2   //C1
+  //const teContactPoint = profile.teCircle.P2   //C1
   const teContactAngelRad = profile.teCircle.theta2
   const teTangentAngleRad = teContactAngelRad-Math.PI/2
   const corrTeTangentAngleRad = teTangentAngleRad + deviationAngleDeg/180*Math.PI
   const corrTeTangentAngleDeg = corrTeTangentAngleRad/Math.PI*180
-  console.log("corrTeTangentAngleDeg",corrTeTangentAngleDeg)
+  //console.log("corrTeTangentAngleDeg",corrTeTangentAngleDeg)
+  const corrContactTeAngleRad = teContactAngelRad+deviationAngleDeg/180*Math.PI
+  const teContactPoint = [//C1
+    profile.teCircle.center[0] + profile.teCircle.radius*Math.cos(corrContactTeAngleRad),
+    profile.teCircle.center[1] + profile.teCircle.radius*Math.sin(corrContactTeAngleRad),
+  ]
+
   const teTan = Math.tan(corrTeTangentAngleRad)  //C2
   
   
@@ -121,17 +129,20 @@ const makeCorrectedCurve = (profile, deviationAngleDeg, sheet0, color) => {
   const corrF  = (x,a) => a.map((v,i)=>v*x**i).reduce((p,c)=>p+c,0)
   
   const N = 21
-  const corrXList = [...Array(N)].map((v,i)=>i/(N-1)*(x2-x1)+x1)
+  const corrXListTmp = [...Array(N)].map((v,i)=>i/(N-1)*(x2-x1)+x1)
+  const corrXList = [].concat(corrXListTmp)
   const corrPoints = corrXList.map(v=>[v,corrF(v,a)])
-  console.log("corrPoints",corrPoints)
+
   
   if(color !==""){
     drawCurve(sheet0, corrPoints,color)
   }
+  const xEnd = profile.sPoints[0][0]
+  const yEnd = teTan*(xEnd-teContactPoint[0])+teContactPoint[1]
   
   const afts = [...Array(N)].map((v,i)=>i/(N-1)*(1-sThroat)+sThroat).slice(1)
   const aftPoints = afts.map(v=>[profile.sSpline.X(v),profile.sSpline.Y(v)])
-  const newSpoints = [].concat([profile.sPoints[0]],corrPoints, aftPoints)
+  const newSpoints = [].concat([[xEnd,yEnd]],corrPoints, aftPoints)
   
   const obj = {sPoints: newSpoints, pPoints: profile.pPoints}
   return obj 
@@ -168,11 +179,13 @@ const main = async() => {
   const profile = makeProfile(profilePoints,pitch, sheet0,"blue") 
   console.log("profile",profile)
   
+  const colors = ["red","green","black","orange","purple","brown"]
+  for(let i=1;i<6;i++){
+    const newProfilePoints = makeCorrectedCurve(profile, i, sheet0, "") 
+    const newProfile = makeProfile(newProfilePoints,pitch, sheet0, colors[i]) 
+    console.log("new profile",newProfile)
+  }
 
-  
-  const newProfilePoints = makeCorrectedCurve(profile, 0, sheet0, "") 
-  console.log("newProfilePoints",newProfilePoints)
-  const newProfile = makeProfile(newProfilePoints,pitch, sheet0,"red") 
-  console.log("newProfile",newProfile)
+
 }
 main()
