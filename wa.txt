@@ -1,230 +1,442 @@
-import {parseURL,getMatchURL, parseParameters} from "./url.js"
+import {worksheet} from "../viewModel.js"
+import {icon} from "../icon/icon.js"
 
-
-const App = class{
-  constructor(){
-    this.methodMap = new Map([
-      ["DELETE", new Map()],
-      ["GET", new Map()],
-      ["POST", new Map()],
-      ["PUSH", new Map()],
-      ["PUT", new Map()],
-      ["UPDATE", new Map()],
-    ])
-  }
-  add(method, url, func){
-    const methodMap = this.methodMap.get(method)
-    methodMap.set(url, func)
-  }
-  handleMessage(req, res){
-    const header = req.header
-    console.log("header", header)
-    console.log(req, res)
-
-    switch(header){
-      case "RESPONSE": {
-        const requestId = req.requestId
-        const data = req.body
-        console.log("data", data)
-        const ev = new CustomEvent(requestId, {detail: {data:data}})
-        document.dispatchEvent(ev)
-        break
-      }
-      case "REQUEST": {
-        console.log("REQUEST", req)
-
-        const requestId = req.requestId
-
-        const f = (body) => {
-          const obj = {
-            header: "RESPONSE",
-            requestId: requestId,
-            body: body,
-          }
-          res.postMessage(obj)
-        } 
-        res.json = f
-        const method = req.method
-        const url = req.url
-    
-        const urlMap = this.methodMap.get(method) 
-        if(urlMap ===undefined){
-          throw new Error(`method ${method} does not match`)
-        }
-
-        const matchURL = getMatchURL(url,urlMap)
-        console.log(matchURL)
-
-        const func = urlMap.get(matchURL)
-        if(func ===undefined){
-          throw new Error(`url: ${url} is no defined`)
-        }
-        const params = parseParameters(url, matchURL)
-        console.log("params",params)
-        req.params = params
-
-        func(req, res)
-        break
-      }
-    }
-  }
-} 
-
-const MessageAPI = class{
-  constructor(){
-    this.port= null 
-    this.fullName= null 
-    this.name= null 
-    this.id= null 
-    this.app = new App()
-  }
-  initialize(e){
-    this.port = e.ports[0]
-    this.fullName = e.data.fullName
-    this.name = e.data.name
-    this.id= e.data.name
-    this.port.start()
-    this.setReceiver()
-  }
-  setReceiver(){
-    const self = this
-    const f = e => {
-      const req = e.data
-      const res = e.target
-      self.app.handleMessage(req, res)
-    }
-    this.port.onmessage = f
-  }
-  send(message){
-    this.port.postMessage(message)
-  }
-  async fetch(obj, requestId){
-    const self = this
-    const prom =  new Promise((resolve,reject)=>{
-      document.addEventListener(requestId, (e)=>{resolve(e.detail.data)}, {once:true});
-      self.send(obj)
-    })
-    return prom
-  }
+"use strict"
+const elements = {
+  paper: document.getElementById("paper"),
+  paperArticle: document.getElementById("paperArticle"),
+  stencil: document.getElementById("stencil"),
+  direction: document.getElementById("direction"),
+  arrow: document.getElementById("arrow"),
+  searchResults: document.getElementById("searchResults"),
 }
  
+const obj = {
+  graph : null,
+  paper : null,
+  panAndZoom : null,
+  stencilGraph : null,
+  stencilPaper :  null,
+  stencilWidth : null,
+  stencilHeight : null,
+}
 
+export const getPaper = () => obj.paper
+export const getStencilGraph = () => obj.stencilGraph
+export const getStencilPaper = () => obj.stencilPaper
+export const getStencilWidth = () => obj.stencilWidth
+export const getStencilHeight = () => obj.stencilHeight
+ 
+export const initialize = () => {
 
-const	Transceiver = class{
-  constructor(){
-    this.messageAPI = new MessageAPI()
+  setTemplate()
+  setPaper()
+  addPaperEvent()
+  addGraphEvent()
+    
+  setStencil()
+  addStencilEvent()
+
+  addChangeArrowEvent()
+
+  window.onresize = resize
+
+}
+
+const setTemplate = () => {
+  const template = [
+    '<g class="rotatable">',
+      '<g class="scalable"><rect class="body"/></g>',
+      '<image/>',
+      '<text class="label"/>',
+      icon.close,
+      '<g class="inPorts"/>',
+      '<g class="outPorts"/>',
+    '</g>',
+  ].join("")
+
+  
+  joint.shapes.devs.MyImageModel = joint.shapes.devs.Model.extend({
+    markup: template,
+    defaults: joint.util.deepSupplement({
+      type: 'devs.MyImageModel',
+      size: { width: 150, height: 90 },
+      attrs: {
+        '.port-body': {
+          r: 5,
+          magnet: true,
+          stroke: '#BBBBBB'
+        },
+        'svg.remove':{
+          event:"element:button:remove"
+        },
+        'text.label':{
+          event:"element:button:label"
+        },
+
+        'svg.arrow':{
+          event:"element:button:arrow"
+        },
+        '.inPorts circle': { fill: '' },
+        '.outPorts circle': { fill: '' },
+        image: { 
+          'xlink:href': '/images/rout6.gif', 
+          width: 150, 
+          height: 90, 
+          'ref-x': 0.5, 
+          'ref-y': 0.5, 
+          ref: 'rect', 
+          'x-alignment': 'middle', 
+          'y-alignment': 'middle'
+        }
+      }
+    }, joint.shapes.devs.Model.prototype.defaults)
+  })
+  joint.shapes.devs.MyImageModelView = joint.shapes.devs.ModelView
+}
+
+const connectionValidation = (cellViewS, magnetS, cellViewT, magnetT, end, linkView) => {
+  // Prevent linking from input ports.
+  if (magnetS && magnetS.getAttribute('port-group') === 'in'){
+    return false
   }
-  initialize(e){
-    this.messageAPI.initialize(e)
+  // Prevent linking from output ports to input ports within one element.
+  if (cellViewS === cellViewT){
+    return false
   }
-  async fetch(URL, obj){
-    //@params
-    //obj = {
-    //  body: Object(),
-    //  method: String(),// "DELETE", "GET", "POST", "PUSH", "PUT", "UPDATE"
-    //  url: String(), // "/", "/getResult"
-    //  header: String(), // request, response
-    // source : {
-    //  name: String(), // "wbb" (my name)
-    //  fullName: String(), //"wbb.1"  (my full name)
-    //  id: Number(), //1  (my id)
-    //  label: String(), // wbb_test 
-    //},
-    //  requestId: String(), //2134534322.fetch.GET
-    //  stream: String(), // "UPSTREAM", "DOWNSTREAM", "UP-DOWNSTREAM", "GLOBAL"
-    //  identifier: String() || Number() || [String()] || [Number()], //"wb_test" ,  1, ["wb_test"][1, 2]
-    //  target: String(), // "wba"
-    //  query: JSON(), // {input:1, output:2} 
-    //}
-    const streamList = ["UPSTREAM", "DOWNSTREAM", "UP-DOWNSTREAM", "GLOBAL"]
-    const method = obj?.method
-    const stream = obj?.stream
-    obj.method = method ===undefined ? "GET" : method
-    obj.stream = stream ===undefined ? "UPSTREAM" :
-                 !streamList.includes(stream)? "UPSTREAM":
-                 stream
+  // Prevent linking to input ports.
+  if(magnetT && magnetT.getAttribute('port-group') !== 'in'){
+    return false
+  }
+  if(cellViewT.model instanceof joint.dia.Link ){
+    return false
+  }
+  return true
 
-    const {target, url, query} = parseURL(URL)
-    obj.url = url
-    obj.header = "REQUEST"
-    obj.source = {
-      name: this.messageAPI.name,
-      fullName: this.messageAPI.fullName,
-      id: this.messageAPI.id
+}
+
+const setPaper = () => {
+  const paperArticleElem = elements.paperArticle
+  const width = paperArticleElem.getBoundingClientRect().width 
+  const height = paperArticleElem.getBoundingClientRect().height 
+  const attr= {
+    attrs: { 
+      '.marker-target': { d: 'M 10 0 L 0 5 L 10 10 z',fill:"#3366FF",stroke:"#3366FF" },
+      '.connection': { stroke:"#3366FF",strokeWidth:"3px" },
     }
-    obj.target = target
-    obj.url = url
-    obj.query = query
-
-    const requestId = String(performance.now())
-      + ".FETCH"+"." + method
-
-    obj.requestId = requestId
-    console.log("request", obj)
-
-    if(method =="PUSH"){
-      this.messageAPI.send(obj)
-      return new Promise.resolve()
-    }
-
-    const self = this
-    const results = self.messageAPI.fetch(obj, requestId)
-
-    return results
   }
+  const linkObj = new joint.dia.Link(attr)
+  const graph = new joint.dia.Graph
+  const paperObj = { 
+    el: $('#paper'), 
+    width: width, 
+    height: height, 
+    gridSize: 1, 
+    model: graph,
+    defaultLink: linkObj,
+    validateConnection: connectionValidation,
+  }
+  const paper = new joint.dia.Paper(paperObj)
+  obj.graph = graph
+  obj.paper = paper 
+}
+
+const addPaperEvent = () => {
+  const paperElem = elements.paper 
+  const paper = obj.paper
+
+  const panAndZoom = svgPanZoom(paperElem.childNodes[2],{
+    viewportSelector: ".svg-pan-zoom_viewport",
+    fit: false,
+    dblClickZoomEnabled: false, 
+    constain:false,
+    center:false,
+    zoomScaleSensitivity: 0.2,
+    panEnabled: false,
+  })
+
+  paper.on('blank:pointerdown', (evt, x, y)=> {
+    panAndZoom.enablePan()
+  })
+  paper.on('cell:pointerup blank:pointerup', (cellView, event)=> {
+   panAndZoom.disablePan()
+  })
+  
+  paper.on('element:button:remove', (elementView,e,x,y) => {
+    const elemModel = elementView.model
+    const id = elementView.model.id
+    worksheet.removeAppById(id)
+    elemModel.remove()
+    console.log("remove")
+  })
+  paper.on("element:button:label",  (elementView,e,x,y) => {
+    e.stopPropagation()
+    const elemModel = elementView.model
+    const fullname = elemModel.attr(".label/text")
+    const newname = prompt("enter new app name", fullname)
+    if(newname){
+      const id = elemModel.id
+      console.log("change label", "id", id)
+      const wb = worksheet.getAppById(id)
+      wb.changeLabel(newname)
+
+ 
+      elemModel.attr(".label/text", newname)
+    }
+  })
+
+  paper.on('cell:pointerclick', (elementView,e,x,y) => {
+    e.stopPropagation()
+    const id = elementView.model.id
+    const wbObj = worksheet.getAppById(id)
+    if(!wbObj){return}
+    console.log(elementView)
+    console.log(e)
+    wbObj.open()
+  })
+
+  paper.on('cell:pointerup', (cellView, evt)=>{
+    const elem = cellView.model
+    const source = elem.get('source')
+    const target = elem.get('target')
+    if (elem instanceof joint.dia.Link && (!source.id || !target.id)) {
+       elem.remove()
+    }
+  })
+
+  obj.panAndZoom = panAndZoom
+}
+
+const addGraphEvent = () => {
+  const graph = obj.graph
+  graph.on('change:source change:target', (link)=> {
+    const idS = link.get('source').id
+    const idT = link.get('target').id
+    if (idS && idT) {
+      worksheet.createConnectionById(idS, idT)
+    }
+  })
+
+  graph.on('remove', (cell, collection, opt)=> {
+    if (cell.isLink()) {
+     // console.log("cell",cell)
+     // console.log("collection",collection)
+     // console.log("opt",opt)
+     // console.log("worksheet", worksheet.idlist)
+      const idS = cell.source().id
+      const idT = cell.target().id
+      worksheet.removeConnectionByIds(idS, idT) 
+    }
+  })
 }
 
 
-export const Workbench = class{
-  constructor(){
-    this.transceiver = null
-    this.initialize()
-  }
-  initialize(){
-    this.transceiver = new Transceiver()
-    const self = this
-    const f = (e)=>{
-      self.transceiver.initialize(e)
-      window.onmessage = null
-    }
-    window.onmessage = f 
-  }
-  async getApps(){
-    const apps = await this.transceiver.messageAPI.fetch("/WORKBENCH/apps")
-    return apps
-  }
-  getMyName(){
-    const fullName = this.transceiver.messageAPI.fullName
-    const name = this.transceiver.messageAPI.name
-    const id = this.transceiver.messageAPI.id
-    const obj = {fullName, name, id}
-    return obj
-  }
-  express(){
-    const Delete = (url, func) => {
-      this.transceiver.messageAPI.app.add("DELETE", url, func)
-    }
-    const get = (url, func) => {
-      this.transceiver.messageAPI.app.add("GET", url, func)
-    }
-    const post = (url, func) => {
-      this.transceiver.messageAPI.app.add("POST", url, func)
-    }
-    const push = (url, func) => {
-      this.transceiver.messageAPI.app.add("PUSH", url, func)
-    }
-    const put  = (url, func) => {
-      this.transceiver.messageAPI.app.add("PUT", url, func)
-    }
-    const update = (url, func) => {
-      this.transceiver.messageAPI.app.add("UPDATE", url, func)
-    }
+const setStencil = () => {
+  const searchResultsElem = elements.searchResults
+  const stencilWidth = searchResultsElem.getBoundingClientRect().width 
+  const stencilHeight = searchResultsElem.getBoundingClientRect().height 
 
-    const obj = {delete:Delete, get, post, push, put, update}
-    return obj
+  const stencilGraph = new joint.dia.Graph
+  const paperObj = {
+    el: $("#stencil"),
+    height: stencilHeight,
+    width: stencilWidth,
+    model: stencilGraph,
+    interactive: false
   }
-  async fetch(URL,obj){
-    return await this.transceiver.fetch(URL, obj)
+  const stencilPaper = new joint.dia.Paper(paperObj)
+
+  obj.stencilGraph = stencilGraph
+  obj.stencilPaper = stencilPaper
+  obj.stencilWidth = stencilWidth
+  obj.stencilHeight = stencilHeight
+}
+
+const mouseMoveEv = offset => {
+  return (e)=> {
+    $("#flyPaper").offset({
+      left: e.pageX - offset.x,
+      top: e.pageY - offset.y
+    });
   }
 }
 
+const mouseUpEv = (offset, flyShape) => {
+  return async (e)=> {
+    const directionElem = elements.direction
+    const paper = obj.paper
+    const graph = obj.graph
+    const stencilPaper = obj.stencilPaper
+    const panAndZoom = obj.panAndZoom
+  
+    const x = e.pageX
+    const y = e.pageY
+    const target = paper.$el.offset()
+    
+    // Dropped over paper ?
+    const flag = x > target.left 
+                 && x < target.left + paper.$el.width() 
+                 && y > target.top 
+                 && y < target.top + paper.$el.height()
+    if (flag) {
+      const name = flyShape.prop("name") 
+      const src = flyShape.prop("src") 
+      const wbObj = await worksheet.add(name)
+      const fullName = wbObj.fullName
+      const direction = directionElem.value
+      console.log(direction)
+      const [portIn, portOut, portInLabel, portOutLabel] = 
+        direction ==="left-right" ? ["left", "right", "left", "right"] :
+        direction ==="right-left" ? ["right", "left", "right", "left"] :
+        direction ==="top-bottom" ? ["top", "bottom", "left", "right"] :
+        ["bottom", "top", "right", "left"]
+  
+      const pan = panAndZoom.getPan()
+      const zoom = panAndZoom.getZoom()
+      const dx =pan.x
+      const dy =pan.y
+      const imgObj = {
+        position:{
+          x: (x - target.left - offset.x -dx)/zoom,
+          y: (y - target.top - offset.y-dy)/zoom, 
+        },
+        size: {
+          width: 150,
+          height: 90,
+        },
+        inPorts: ["in"],
+        outPorts: ["out"],
+        ports:{
+          groups: {
+            "in": {
+              attrs: {
+                ".port-body":{
+                  fill: '#9966FF',
+                  stroke: "#FFFFFF",
+                  strokeWidth: "4px",
+                  magnet: "passive",
+                },
+              },
+              position: portIn,
+              label: {position:{name:portInLabel}},
+            },
+            "out": {
+              attrs: {
+                ".port-body":{
+                  fill: '#669966',
+                  strokeWidth: "4px",
+                  stroke: "#FFFFFF",
+                }
+              },
+              position: portOut,
+              label: {position:{name:portOutLabel}}
+            },
+          }
+        },
+        attrs: {
+          ".label" :{
+            text: fullName,
+            x: 0,
+            y: 100,
+            fill:"#666666"
+          },
+          ".body": {
+            stroke: "#BBBBBB",
+            "stroke-width": "3px",
+          },
+          image:{
+            xlinkHref: src
+          }
+        }
+      }
+      const s = new joint.shapes.devs.MyImageModel(imgObj)
+      graph.addCell(s)
+      worksheet.register(s.id, wbObj)
+    }
+    $('body').off('mousemove.fly').off('mouseup.fly')
+    flyShape.remove()
+    $('#flyPaper').remove()
+  }
+}
+
+const stencilPaste = (cellView, e, x, y) => {
+  $('body').append('<div id="flyPaper" style="position:fixed;z-index:100;opacity:.7;pointer-event:none;"></div>')
+  const flyGraph = new joint.dia.Graph
+  const paperObj = {
+    el: $('#flyPaper'),
+    width: 150, 
+    height: 90, 
+    model: flyGraph,
+    interactive: false
+  }
+  const flyPaper = new joint.dia.Paper(paperObj)
+  const flyShape = cellView.model.clone()
+  const pos = cellView.model.position()
+
+  flyShape.position(0, 0);
+  flyGraph.addCell(flyShape)
+
+  const offset = {
+    x: x - pos.x,
+    y: y - pos.y
+  }
+
+  const moveObj = {
+    left: e.pageX - offset.x,
+    top: e.pageY - offset.y
+  }
+
+  const mouseMove = mouseMoveEv(offset)
+  const mouseUp = mouseUpEv(offset, flyShape)
+  $("#flyPaper").offset(moveObj)
+  $('body').on('mousemove.fly',mouseMove )
+  $('body').on('mouseup.fly', mouseUp)
+}
+
+const addStencilEvent = () => {
+  const stencilPaper = obj.stencilPaper
+  stencilPaper.on("cell:pointerdown", stencilPaste )
+}
+
+const resize = () =>{
+  const paperArticleElem = elements.paperArticle 
+  const width = paperArticleElem.getBoundingClientRect().width 
+  const height = paperArticleElem.getBoundingClientRect().height 
+  const paper = obj.paper
+  paper.setDimensions(width, height)
+} 
+
+const addChangeArrowEvent = () => {
+  const setDefaultLink = (e) => {
+    const arrowElem = elements.arrow
+    const arrow = arrowElem.value
+    
+    const attr= {
+      attrs: { 
+        '.connection': { stroke:"#3366FF",strokeWidth:"3px" },
+      }
+    }
+    switch(arrow){
+      case "out-to-in": {
+        attr.attrs['.marker-target'] = { d: 'M 10 0 L 0 5 L 10 10 z',fill:"#3366FF",stroke:"#3366FF" }
+        break
+      }
+      case "in-to-out": {
+        attr.attrs['.marker-source'] = { d: 'M 10 0 L 0 5 L 10 10 z',fill:"#3366FF",stroke:"#3366FF" }
+        break
+      }
+      case "both" :{
+        attr.attrs['.marker-target'] = { d: 'M 10 0 L 0 5 L 10 10 z',fill:"#3366FF",stroke:"#3366FF" }
+        attr.attrs['.marker-source'] = { d: 'M 10 0 L 0 5 L 10 10 z',fill:"#3366FF",stroke:"#3366FF" }
+      }
+      default: {
+        break
+      }
+    }
+
+    const linkObj = new joint.dia.Link(attr)
+    obj.paper.options.defaultLink=linkObj
+  }
+
+  elements.arrow.onchange = setDefaultLink
+}
