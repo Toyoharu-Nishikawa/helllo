@@ -1,0 +1,457 @@
+import {parseURL,getMatchURL, parseParameters} from "../../modules/url.js"
+import {createUUID} from "../../modules/uuid.js"
+
+const sleep = (t) => new Promise(resolve=>seTimeout(resolve,t))
+
+const setInternalMethod = (app, wbApp) => {
+  app.add("PUSH", "/open", (req,res)=>{
+    if(!wbApp.waitUntilInitializationComplete){
+      wbApp.runInitializetionComplete()
+    }
+    console.log("open",req?.source?.fullName)
+  })
+  app.add("PUSH", "/initializationComplete", (req,res)=>{
+    if(wbApp.waitUntilInitializationComplete){
+      wbApp.runInitializetionComplete()
+      console.log("initializationComplete",req?.source?.fullName)
+    }
+  })
+  app.add("PUSH", "/unload", (req,res)=>{
+    //console.log("unload")
+    wbApp.reload()
+  })
+
+}
+
+
+const Connection = class {
+  constructor(){
+    this.inMap = new Map()
+    this.outMap = new Map()
+  }
+  addToIn(fullName, appObj){
+    this.inMap.set(fullName, appObj)
+  }
+  addToOut(fullName, appObj){
+    this.outMap.set(fullName, appObj)
+  }
+  removeFromIn(fullName){
+    this.inMap.delete(fullName)
+  }
+  removeFromOut(fullName){
+    this.outMap.delete(fullName)
+  }
+  getInApps(){
+    const inList = [...this.inMap.values()]
+    return inList
+  }
+  getOutApps(){
+    const outList = [...this.outMap.values()]
+    return outList
+  }
+
+  getInInfo(){
+    const inList = [...this.inMap.values()]
+    const appInfo = inList.map(v=>Object({name:v.name, fullName:v.fullName,label:v.label, appId:v.appId})) 
+    return appInfo
+  }
+  getOutInfo(){
+    const outList = [...this.outMap.values()]
+    const appInfo = outList.map(v=>Object({ name:v.name,fullName:v.fullName, label:v.label, appId:v.appId})) 
+    return appInfo
+  }
+  getTargetAppList(target, stream, identifier){
+    const appList =  stream === "UPSTREAM" ? [...this.inMap.values()] :
+                     stream === "DOWNSTREAM" ? [...this.outMap.values()]:
+                     stream === "UPSTREAM_DOWNSTREAM" ? [...this.inMap.values(), ...this.outMap.values()]:
+                     []
+
+    if(target==="ALL"){
+      return appList
+    }
+
+    const filterFunc = identifier === "NAME" ? (v) => v.name ===target :
+                       identifier === "FULLNAME" ? (v) => v.fullName ===target :
+                       identifier === "LABEL" ? (v) => v.label ===target :
+                       (v) => v.name ===target
+
+
+    const filteredList = appList.filter(filterFunc)
+
+    return filteredList 
+  }
+}
+
+
+const MessageAPI = class{
+  constructor(){
+    this.channel = null
+    this.port = null
+    this.getWsIdList = null
+    this.getWbIdList = null
+    
+    this.initialize()
+  }
+  initialize(){
+    this.closePort()
+    const channel = new MessageChannel()
+    channel.port1.start()
+    this.channel = channel
+    this.port = channel.port1
+  }
+  closePort(){
+    if(this.port && this.port instanceof MessagePort){
+      console.log("closed the old message port")
+      this.port.onmessage = null
+      this.port.close()
+    }
+  }
+  setReceiver(func){
+    const f = e => {
+      const req = e.data
+      const res = e.target
+      res.json = res.postMessage
+      func(req, res)
+    }
+    this.port.onmessage = f
+  }
+  send(data){
+    this.port.postMessage(data)
+  }
+  fetch(data, requestUUID){
+    const method = data.method
+    if(method !=="PUSH"){
+      const prom = new Promise((resolve, reject)=>{
+        const callback = (e) =>{resolve(e.detail.data)}
+        document.addEventListener(requestUUID, callback, {once:true}) //event dispatched in hanldleMesage RESPONSE
+        this.send(data)
+      })
+      return prom
+    }
+    else{
+      this.send(data)
+    }
+  }
+}
+
+
+
+const App = class {
+  constructor(worksheet, wbApp){
+    this.messageAPI = null
+    this.connection = null
+    this.worksheet = worksheet
+    this.wbApp = wbApp 
+    this.methodMap = new Map([
+      ["DELETE", new Map()],
+      ["GET", new Map()],
+      ["POST", new Map()],
+      ["PUSH", new Map()],
+      ["PUT", new Map()],
+      ["UPDATE", new Map()],
+    ])
+    this.initialize()
+  }
+  initialize(){
+    this.messageAPI = new MessageAPI()
+    this.connection = new Connection()
+    this.setReceiver()
+  }
+  add(method, url, func){
+    const methodMap = this.methodMap.get(method)
+    methodMap.set(url, func)
+  }
+  setReceiver(){
+    this.messageAPI.setReceiver(this.handleMessage.bind(this))
+  }
+  async handleMessage(req, res){
+    //console.log("on messsage", req)
+    const header = req.header
+    switch(header){
+      case "RESPONSE": {
+        this.responseFunc(req, res)
+        break
+      }
+      case "REQUEST": {
+        this.requestFunc(req, res)
+        break
+      }
+    }
+  }
+  responseFunc(req, res){
+     //console.log("RESPONSE data", req)
+     const requestUUID = req.requestUUID
+     const data = req.body
+     const ev = new CustomEvent(requestUUID, {detail: {data:data}})
+     document.dispatchEvent(ev)
+  }
+  requestFunc(req, res){
+    const target = req.target
+    switch(target){
+      case "WORKSHEET":{
+        this.requestToWorksheet(req, res)
+        break
+      }
+      case  "INTERNAL":{
+        this.requestToINTERNAL(req, res)
+        break
+      }
+      default :{
+        this.requestToOtherApps(req, res)
+      }
+    }
+  }
+  async requestToWorksheet(req, res){
+    const method = req.method
+    const url = req.url
+    const requestId = req.requestId
+
+    if(method==="PUSH"){
+      this.worksheet.api(method, url, req)
+      return
+    }
+    //console.log("method", method, url)
+    const results = await this.worksheet.api(method, url, req)
+    const obj = {
+      header: "RESPONSE",
+      requestId: requestId,
+      body: results
+    }
+    res.json(obj)
+  }
+  async requestToINTERNAL(req, res){
+    //console.log("request to internal ")
+    const method = req.method
+    const url = req.url
+    const requestId = req.requestId
+
+    const f = (body) => {
+      const obj = {
+        header: "RESPONSE",
+        requestId: requestId,
+        requestUUID: requestUUID,
+        body: body,
+      }
+      res.postMessage(obj)
+    }
+    res.json = f
+
+    const urlMap = this.methodMap.get(method)
+    if(urlMap ===undefined){
+      //throw new Error(`method ${method} does not match`)
+      const errorMessage = `method ${method} is not defined`
+      //console.log(errorMessage)
+      const obj = {errorMessage: errorMessage}
+      res.json(obj)
+      return
+    }
+
+    const matchURL = getMatchURL(url,urlMap)
+    //console.log("matchURL", matchURL)
+
+    const func = urlMap.get(matchURL)
+    if(func ===undefined){
+      //throw new Error(`url: ${url} is no defined`)
+      const errorMessage = `url: ${url} is no defined`
+      //console.log(errorMessage)
+      const obj = {errorMessage: errorMessage}
+      res.json(obj)
+      return
+    }
+
+    const params = parseParameters(url, matchURL)
+    //console.log("params",params)
+    req.params = params
+
+    func(req, res)
+  }
+  async requestToOtherApps(req, res){
+    const target = req.target
+    const stream = req.stream
+    const method = req.method
+    const requestId = req.requestId
+    const myFullName = this.wbApp.fullName
+    const identifier = req.identifier
+    const targetAppList = stream === "GLOBAL" ?
+                 this.worksheet.getTargetAppList(target, identifier,myFullName):
+                 this.connection.getTargetAppList(target, stream, identifier)
+    //console.log("targetAppList",targetAppList)
+
+    if(method==="PUSH"){
+      targetAppList.forEach(v=>v.app.messageAPI.fetch(req,null))
+      return 
+    }
+    const results = await this.transmit(targetAppList, req)
+    //console.log("results",results)
+    const obj = {
+      header: "RESPONSE",
+      requestId: requestId,
+      body: results
+    } 
+    res.json(obj)
+  }
+  async transmit(targetAppList, req){
+     const proms = targetAppList.map(async v=>{
+       const requestUUID = createUUID()
+       req.requestUUID = requestUUID 
+       const res = await v.app.messageAPI.fetch(req, requestUUID)
+       const fullName = v.fullName
+       const __source = {
+        name: v.name,
+        fullName: v.fullName,
+        appId: v.appId,
+        label: v.label,
+       }
+       res.__source = __source
+       //console.log("res", res)
+       const li = [fullName, res]
+       return li 
+     })
+     const results = await Promise.all(proms)
+     return results
+  }
+  async internalFetch(URL, obj){
+    const requestUUID = createUUID()
+    obj.connection = "INTERNAL"
+    obj.header = "REQUEST"
+    obj.requestUUID = requestUUID 
+    obj.url = URL
+    obj.method = obj?.method || "PUSH"
+    const res = await this.messageAPI.fetch(obj,requestUUID)
+    return res
+  }
+}
+
+export const WorkbenchApp = class { 
+  constructor(name, appId, worksheet){
+    this.name = null 
+    this.appId = null 
+    this.win= null
+    this.label=null
+    this.app = null
+    this.initialize(name, appId, worksheet)
+  } 
+  initialize(name, appId, worksheet){
+    const fullName = name + "." + appId 
+    const label = fullName
+    this.name = name
+    this.appId = appId 
+    this.fullName = fullName
+    this.label = label
+    this.getWbIdList = null
+    this.app = new App(worksheet, this)
+    this.WORKBENCH_CERTIFICATION_ID = null
+    this.win = null
+    setInternalMethod(this.app, this)
+  }
+  async open(config){
+    const timeout = config?.timeout || 60E3
+    const waitUntilInitializationComplete = config?.waitUntilInitializationComplete ==false ? false: true 
+    const self = this 
+    this.waitUntilInitializationComplete = waitUntilInitializationComplete
+
+    return new Promise((resolve,reject)=>{
+      this.initializeCompleteFunc = resolve
+
+      if(!this.win || this.win.closed){
+        this.removeReloadEventListener()
+        //console.log("win",this.win,this.win?.closed)
+        const name = this.name
+        const fullName = this.fullName
+        const appId = this.appId
+        const label = this.label
+        const url = "/" + this.name + "/"
+        if(this.win?.closed){
+          this.app.messageAPI.initialize()
+          this.app.setReceiver()
+        }
+  
+        const f = (e) => {
+          const certification = e.data
+          //console.log("receive message",certification)
+          if(certification===WORKBENCH_CERTIFICATION_ID){
+            window.removeEventListener("message",f)
+            console.log("match certification")
+            const obj = {name, fullName, appId, label}
+            self.win.postMessage(obj, "*", [self.app.messageAPI.channel.port2])
+          }
+        }
+        window.addEventListener("message",f)
+  
+        this.win = window.open(url)  
+        const WORKBENCH_CERTIFICATION_ID = createUUID()
+        this.WORKBENCH_CERTIFICATION_ID = WORKBENCH_CERTIFICATION_ID
+        this.win.WORKBENCH_CERTIFICATION_ID = WORKBENCH_CERTIFICATION_ID
+        const timeoutOfOpener = setTimeout(()=>{
+          this.initializeCompleteFunc = null
+          window.removeEventListener("message",f)
+          reject("timeout")
+        }, timeout)
+        this.timeoutOfOpener = timeoutOfOpener
+      }
+      else{
+        console.log("focus")
+        this.win.focus()
+        resolve()
+      }
+
+    })
+  }
+  runInitializetionComplete(){
+    //resolve for Promise of open
+    const resolve = this.initializeCompleteFunc
+    const timeoutOfOpener = this.timeoutOfOpener
+    clearTimeout(timeoutOfOpener)
+    if(typeof resolve === "function"){
+      resolve()
+    }
+  }
+  async reload(){
+    //console.log("win",this.win,this.win?.closed)
+    const name = this.name
+    const fullName = this.fullName
+    const appId = this.appId
+    const label = this.label
+    const self = this 
+
+    const WORKBENCH_CERTIFICATION_ID = this.WORKBENCH_CERTIFICATION_ID
+    const f = (e) => {
+      window.removeEventListener("message",f)
+      const certification = e.data
+      console.log("receive message for reload",certification)
+      //if(certification===WORKBENCH_CERTIFICATION_ID){
+        console.log("match certification for reload")
+
+        self.app.messageAPI.initialize()
+        self.app.setReceiver()
+        const obj = {name, fullName, appId, label}
+        self.win.postMessage(obj, "*", [self.app.messageAPI.channel.port2])
+
+      //}
+    }
+    window.addEventListener("message",f)
+    this.reloadFun = f
+  }
+  removeReloadEventListener(){
+    const f = this.reloadFun 
+    window.removeEventListener("message",f)
+  }
+  async close(){
+    if(this.win){
+      this.app.messageAPI.closePort()
+      this.win.close()
+    }
+  }
+  async internalFetch(URL, obj){
+    return await this.app.internalFetch(URL,obj)
+  }
+  changeLabel(label){
+    this.label = label
+    const obj = {
+      method: "PUSH",
+      body: {label}
+    } 
+    this.internalFetch("/label", obj)
+  }
+}
+
