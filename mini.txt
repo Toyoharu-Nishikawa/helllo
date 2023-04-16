@@ -1,0 +1,103 @@
+import {WorkbenchApp} from "../../workbench/class/WorkbenchApp.js"
+import {createUUID} from "../../modules/uuid.js"
+import {parseURLforMini} from "../../modules/url.js"
+
+const wait = time => new Promise(resolve => setTimeout(resolve, time))
+
+export const WorkbenchAppForMini = class extends WorkbenchApp{
+  constructor(name, appId, worksheet, dom){
+    super()
+    this.name = null 
+    this.appId = null 
+    this.win= null
+    this.label=null
+    this.app = null
+    this.dom = dom || document.body
+    this.initialize(name, appId, worksheet)
+  } 
+  async open(config){
+    const timeout = config?.timeout || 60E3
+    const waitUntilInitializationComplete = config?.waitUntilInitializationComplete ==false ? false: true
+    this.waitUntilInitializationComplete = waitUntilInitializationComplete
+
+
+
+    return new Promise(async (resolve,reject)=>{
+      this.initializeCompleteFunc = resolve
+
+      if(!this.win){
+        console.log("win",this.win,this.win?.closed)
+        const name = this.name
+        const fullName = this.fullName
+        const appId = this.appId
+        const label = this.label
+        const url = "/" + this.name + "/"
+        const self = this 
+
+        this.app.messageAPI.initialize()
+        this.app.setReceiver()
+
+        const iframe = document.createElement("iframe")
+        iframe.src = url
+        this.win=iframe
+        const WORKBENCH_CERTIFICATION_ID = createUUID()
+        this.WORKBENCH_CERTIFICATION_ID = WORKBENCH_CERTIFICATION_ID
+        this.win.WORKBENCH_CERTIFICATION_ID = WORKBENCH_CERTIFICATION_ID
+
+        const f = (e) => {
+          const certification = e.data
+          console.log("receive message",certification)
+          if(certification===WORKBENCH_CERTIFICATION_ID){
+            console.log("match certification")
+            const obj = {name, fullName, appId, label}
+            iframe.contentWindow.postMessage(obj, "*", [self.app.messageAPI.channel.port2])
+            window.removeEventListener("message",f)
+            window.addEventListener("openAPP", ()=>resolve("resolve"),{once:true})
+          }
+        }
+        window.addEventListener("message",f)
+
+        iframe.onload = (e)=>{
+          console.log("contentWindow",iframe.contentWindow)
+          iframe.contentWindow.WORKBENCH_CERTIFICATION_ID = WORKBENCH_CERTIFICATION_ID
+        }
+        this.dom.append(iframe)
+
+        const timeoutOfOpener = setTimeout(()=>{
+          this.initilazeCompleteFunc = null
+          window.removeEventListener("message",f)
+          iframe.onload=null
+          reject(`connection with ${fullName} did not be established.`)
+          console.log("timeout")
+        }, timeout)
+        this.timeoutOfOpener = timeoutOfOpener
+      }
+      else{
+        console.log("app exists")
+        resolve()
+      }
+    })
+  }
+  async close(){
+    if(this.win){
+      this.win.remove()
+    }
+  }
+  async externalFetch(URL, obj){
+    if(obj ===undefined){
+      obj = Object()
+    }
+
+    const urlParam = parseURLforMini(URL)
+
+    const requestUUID = createUUID()
+    obj.connection = "EXTERNAL"
+    obj.header = "REQUEST"
+    obj.requestUUID = requestUUID 
+    obj.url = urlParam.url 
+    obj.method = obj?.method || "GET"
+    obj.query = urlParam.query 
+    const res = await this.app.messageAPI.fetch(obj,requestUUID)
+    return res
+  }
+}
