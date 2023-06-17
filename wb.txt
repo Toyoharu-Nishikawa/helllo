@@ -366,21 +366,21 @@ export const WorkbenchApp = class {
           this.app.setReceiver()
         }
   
+        const WORKBENCH_CERTIFICATION_ID = createUUID()
+        this.WORKBENCH_CERTIFICATION_ID = WORKBENCH_CERTIFICATION_ID
         const f = (e) => {
-          const certification = e.data
+          const certification = e.data?.WORKBENCH_CERTIFICATION_ID
           //console.log("receive message",certification)
           if(certification===WORKBENCH_CERTIFICATION_ID){
             window.removeEventListener("message",f)
             console.log("match certification")
-            const obj = {name, fullName, appId, label}
+            const obj = {name, fullName, appId, label,WORKBENCH_CERTIFICATION_ID}
             self.win.postMessage(obj, "*", [self.app.messageAPI.channel.port2])
           }
         }
         window.addEventListener("message",f)
   
         this.win = window.open(url)  
-        const WORKBENCH_CERTIFICATION_ID = createUUID()
-        this.WORKBENCH_CERTIFICATION_ID = WORKBENCH_CERTIFICATION_ID
         this.win.WORKBENCH_CERTIFICATION_ID = WORKBENCH_CERTIFICATION_ID
         const timeoutOfOpener = setTimeout(()=>{
           this.initializeCompleteFunc = null
@@ -415,8 +415,10 @@ export const WorkbenchApp = class {
     const self = this 
 
     const WORKBENCH_CERTIFICATION_ID = this.WORKBENCH_CERTIFICATION_ID
+    console.log("WORKBENCH_CERTIFICATION_ID",WORKBENCH_CERTIFICATION_ID)
     const f = (e) => {
       window.removeEventListener("message",f)
+      self.win.WORKBENCH_CERTIFICATION_ID = WORKBENCH_CERTIFICATION_ID
       const certification = e.data
       console.log("receive message for reload",certification)
       //if(certification===WORKBENCH_CERTIFICATION_ID){
@@ -424,8 +426,12 @@ export const WorkbenchApp = class {
 
         self.app.messageAPI.initialize()
         self.app.setReceiver()
-        const obj = {name, fullName, appId, label}
-        self.win.postMessage(obj, "*", [self.app.messageAPI.channel.port2])
+        const obj = {name, fullName, appId, label,WORKBENCH_CERTIFICATION_ID}
+        //self.win.postMessage(obj, "*", [self.app.messageAPI.channel.port2])
+
+          //setTimeout(()=>
+          self.win.postMessage(obj, "*", [self.app.messageAPI.channel.port2])
+          //,1E3)
 
       //}
     }
