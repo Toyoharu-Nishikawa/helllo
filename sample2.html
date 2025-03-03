@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>sample2</title>
+  <style>
+    body {
+      width: 100vw;
+      height: 100vh;
+      padding: 0;
+      margin: 0;
+    }
+  </style>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Symbols+Outlined" rel="stylesheet">
+  <script type="importmap">
+    {
+      "imports": {
+        "neco-components/": "/neco-components/scripts/neco-components/"
+      }
+    }
+  </script>
+  <script src="./assets/bundle.js"></script>
+  <script type="module">
+    import "neco-components/plotly/index.js"
+    import "neco-components/minijscad/index.js"
+    import "neco-components/jspreadsheet/index.js"
+    import "./components/my-layout.js"
+    import "./components/my-header.js"
+    import "./components/my-menu.js"
+    import "./components/my-aside.js"
+    import "./components/my-main.js"
+    import "./components/my-footer.js"
+    //import {styles as typescaleStyles} from '@material/web/typography/md-typescale-styles.js';
+    //document.adoptedStyleSheets.push(typescaleStyles.styleSheet);
+  </script>
+</head>
+<body>
+  <my-layout> 
+    <my-header>sample2</my-header>
+    <my-menu>
+      <span style="position: relative">
+        <md-icon-button id="usage-anchor">
+          <md-icon>Description</md-icon>
+        </md-icon-button>
+        <md-menu id="usage-menu" anchor="usage-anchor">
+          <md-menu-item>
+            <div slot="headline">
+              <label>
+                Read file
+                <input type="file" style="display:none;">
+              </label>
+            </div>
+          </md-menu-item>
+          <md-menu-item>
+            <div slot="headline">Write file</div>
+          </md-menu-item>
+        </md-menu>
+      </span>
+      <md-icon-button>
+        <md-icon>Construction</md-icon>
+      </md-icon-button>
+      <md-icon-button>
+        <md-icon>Help</md-icon>
+      </md-icon-button>
+    </my-menu>
+    <my-aside>
+      <md-list>
+        <md-list-item>
+          <md-filled-tonal-button>
+            <md-icon slot="icon">play_arrow</md-icon>run
+          </md-filled-tonal-button>
+        </md-list-item>
+        <md-list-item>
+          <md-filled-tonal-button>
+            <md-icon slot="icon">play_arrow</md-icon>save
+          </md-filled-tonal-button>
+        </md-list-item>
+      </md-list>
+    </my-aside>
+    <my-main>
+      <div name="top-left">
+        <md-outlined-text-field label="Height" value="170"></md-outlined-text-field>
+        <md-outlined-text-field label="Weight" value="60"></md-outlined-text-field>
+        <md-filled-text-field label="BMI" value="22" readonly></md-filled-text-field>
+      </div>
+      <neco-minijscad name="top-right"></neco-minijscad>
+      <neco-plotly name="bottom-left"></neco-plotly>
+      <neco-plotly name="bottom-right"></neco-plotly>
+    </my-main>
+    <my-footer>sample application version 0.0.1</my-footer>
+  </my-layout> 
+
+  <script type="module">
+    const layoutElem = document.querySelector('my-layout')
+    const menu = layoutElem.shadowRoot.querySelector('my-menu')
+    const anchorEl = menu.shadowRoot.querySelector('#usage-anchor')
+    const menuEl   = menu.shadowRoot.querySelector('#usage-menu')
+    anchorEl.addEventListener('click', () => { menuEl.open = !menuEl.open; })
+
+    const main = layoutElem.shadowRoot.querySelector('my-main')
+    const minijscadElem = main.shadowRoot.querySelector('neco-minijscad')
+    const screen = minijscadElem.sketch.screen
+    const sheet0    = screen.addSheet("sheet0")
+    sheet0.addFig("circle",{center:[100,100],radius:50})
+    sheet0.addFig("circle",{center:[200,200],radius:50})
+    sheet0.addFig("circle",{center:[300,300],radius:50})
+    sheet0.addFig("circle",{center:[400,400],radius:50})
+
+
+    const plotlyBL = main.shadowRoot.querySelector('neco-plotly[name=bottom-left]')
+     const  trace1 = {
+        x: [0,1,2,3],
+        y: [2,3,6,7],
+        marker: {size: 8},
+        mode: 'lines+markers',
+        name: ' apple',
+        type: 'scatter',
+      }
+      const  trace2 = {
+        x: [0,1,2,3],
+        y: [2,5,10,7],
+        marker: {size: 8},
+        mode: 'lines+markers',
+        name: 'banana',
+        type: 'scatter',
+      }
+
+      const data = [trace1,trace2]
+      const layout = {
+        autosize: true,
+        title: '',
+        xaxis: {
+          autorange: true,
+          type: 'linear'
+        },
+        yaxis: {
+          autorange: true,
+          type: 'linear'
+        }
+      }
+      plotlyBL.react(data,layout)
+  </script>
+</body>
+</html>
