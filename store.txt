@@ -1,0 +1,62 @@
+/*** Sore class ***/   
+export const Store = class {
+  constructor(obj){
+    this.updating = false
+    this.listeners = new Set()
+    this.data = this.recursiveProxy(obj)
+    this.beforeCallback = null
+    this.afterCallback = null
+  }
+  emit(target,key,value){
+    this.listeners.forEach(cb=>cb(target,key,value))
+  }     
+  subscribe(func){
+    this.listeners.add(func)   
+  }     
+  setData(obj){ 
+    this.data = this.recursiveProxy(obj)
+  }
+  loadData(obj){
+    this.setData(obj)
+    this.emit()
+  }
+  set onBeforeEmit(func){
+    this.beforeCallback = func
+  }
+  set onAfterEmit(func){
+    this.afterCallback = func
+  }
+  recursiveProxy = (obj) =>{
+    // オブジェクトでない場合はそのまま返す
+    if (typeof obj !== 'object' || obj === null) {
+      return obj
+    }
+  
+    // オブジェクトの各プロパティを走査
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        // プロパティがオブジェクトの場合、再帰的にProxy化する
+        obj[key] = this.recursiveProxy(obj[key])
+      }
+    }
+    const self = this 
+    // Proxyオブジェクトを作成して返す
+    const func = new Proxy(obj, {
+      set(target, key, value,receiver) {
+        const oldValue = target[key]
+        if(oldValue!==value){
+          const result = Reflect.set(target, key, value, receiver)
+          if(!self.updating) {
+            if(typeof self.beforeCallback =="function")self.beforeCallback(self.data)
+            self.updating = true
+            self.emit(target,key,value)
+            if(typeof self.afterCallback =="function")self.afterCallback(self.data)
+            self.updating = false;
+          }
+        }
+        return true 
+      }
+    })
+    return func
+  }
+} 
