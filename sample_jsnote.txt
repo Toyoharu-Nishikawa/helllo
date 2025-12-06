@@ -1,0 +1,86 @@
+console.clear()
+
+
+const makeCrossPoint = (prop) => {
+  const {theta1,theta2,R1,R2} = prop
+  
+  const a = Math.sin(theta1+theta2)
+  const px_tmp = R1*(-Math.sin(theta2)-Math.sin(theta1)*Math.cos(theta2))
+                -R2*Math.sin(theta1)*(1-Math.cos(theta2))
+                
+  const py_tmp = R1*(1-Math.cos(theta1))*Math.cos(theta2)
+                -R2*Math.cos(theta1)*(1-Math.cos(theta2))
+  
+  const P = [px_tmp/a, py_tmp/a ]
+  
+  return P 
+}
+
+const main = async() => {
+  //const MJ =await import("/neco-three/lib/dist/index.js")
+  const MJM =await import("/neco-minijscad/dist/index.js")
+  const MJMTagName = MJM.TAG_NAME
+  console.log(MJM)
+  console.log(MJMTagName)
+  const elem = document.createElement(MJMTagName)
+  console.log(elem)
+  const drawElem = document.getElementById("draw")
+  drawElem.style.height = "500px"
+  drawElem.style.width = "500px"
+  
+  drawElem.appendChild(elem)
+  
+  
+  const theta1 = 40/180*Math.PI
+  const theta2 = 30/180*Math.PI
+  const R1    = 100
+  const R2    =  60
+  const prop = {theta1, theta2, R1, R2}
+  const P = makeCrossPoint(prop)
+  
+  const H1 = [-R1*Math.cos(theta1), R1*Math.sin(theta1)]
+  const H2 = [-R1+R2*(1-Math.cos(theta2)), -R2*Math.sin(theta2)]
+ 
+  const sheet0 = elem.screen.addSheet("sheet0") 
+  sheet0.addFig("arc",{center:[0,0],radius:R1, start:180-theta1*180/Math.PI, end:180})
+  sheet0.addFig("line",{points:[[0,0],H1]})
+  
+  sheet0.addFig("line",{points:[[-(R1-R2),0],[0,0]]})
+  
+  sheet0.addFig("arc",{center:[-(R1-R2),0],radius:R2, start:180, end:180+theta2*180/Math.PI})
+  sheet0.addFig("line",{points:[[-(R1-R2),0],H2]})
+  
+  
+  sheet0.addFig("line",{points:[P,H1]})
+  sheet0.addFig("line",{points:[P,H2]})
+  
+  sheet0.addDimension("radius", 
+    {center:[0,0],radius:R1,angle:(180-theta1*180/Math.PI)/2+90},
+    {
+     font:{"font-size":10,"stroke-width":0.1},
+     decimalPlaces:0
+    }
+  )
+  sheet0.addDimension("radius", 
+    {center:[-(R1-R2),0],radius:R2,angle:(180+theta2*180/Math.PI)/2+90},
+    {
+     font:{"font-size":10,"stroke-width":0.1},
+     decimalPlaces:0
+    }
+  ) 
+  sheet0.addDimension("angle", 
+    {center:[0,0],radius:R1/5,start:180-theta1*180/Math.PI, end:180},
+    {
+     font:{"font-size":10,"stroke-width":0.1},
+     decimalPlaces:0
+    }
+  )
+  sheet0.addDimension("angle", 
+    {center:[-(R1-R2),0],radius:R2/5,start:180, end:180+theta2*180/Math.PI},
+    {
+     font:{"font-size":10,"stroke-width":0.1},
+     decimalPlaces:0
+    }
+  ) 
+}
+main()
