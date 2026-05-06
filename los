@@ -1,0 +1,89 @@
+console.clear()
+/* Store
+ */
+const store = new Store()
+store.setData({
+  runCounter:0,
+  tableData:[]
+})
+
+/*Plotly
+ */
+const id0 = {
+  shadow: cardMap.get("id0").elem,
+  initialize(){
+    store.subscribe(this.draw.bind(this))
+  },
+  draw(target,key,value){
+    console.log("key",key)
+    if(key!=="runCounter")return
+    const tableData = store.data.tableData
+    const trace1 = {
+      x: tableData[0].map(v=>v[0]),
+      y: tableData[0].map(v=>v[1]),
+      type: "scatter",
+    }
+    const trace2 = {
+      x: tableData[1].map(v=>v[0]),
+      y: tableData[1].map(v=>v[1]),
+      type: "scatter",
+    } 
+    const data = [trace1, trace2]
+    this.shadow.react(data)
+  }
+}
+
+/*Jspreadsheet
+ */
+const id1 = {
+  shadow: cardMap.get("id1").elem,
+  initialize(){
+    const worksheets = {
+      worksheets:[
+        {
+          tableOverflow:true,
+          tableWidth:"auto",
+          tableHeight:"auto",
+          data:[[0,0],[1,1]],
+          columns:[{type:"number", title:"x"},{type:"number",title:"y"}],
+        },
+        {
+          tableOverflow:true,
+          tableWidth:"auto",
+          tableHeight:"auto",
+          data:[[0,0],[1,1]],
+          columns:[{type:"number",title:"x"},{type:"number",title:"y"}],
+        }
+      ],
+      onchange(instance, cell, x, y, value){
+        const sheetIndex = instance.parent.worksheets.indexOf(instance);
+        console.log('変更されたシート番号:', sheetIndex);
+        console.log('要素:', cell);      // 変更されたTD要素
+        console.log('座標:', x, y);     // 列(x)と行(y)のインデックス
+        console.log('新しい値:', value); // 入力された値
+        const worksheets= instance.parent.worksheets
+        const data = worksheets.map(v=>v.getData().map(u=>u.map(w=>Number(w))))
+        store.data.tableData = store.recursiveProxy(data)
+      },
+    }
+     this.shadow.setContents(worksheets)
+  },
+}
+const id2 = {
+shadow: cardMap.get("id2").elem,
+  initialize(){
+    this.shadow.onclick = this.clickEV
+  },
+  clickEV(e){
+    console.log("click")
+    store.data.runCounter +=1
+  }
+}
+
+const initialize = () => {
+  id0.initialize()
+  id1.initialize()
+  id2.initialize()
+}
+
+initialize()
